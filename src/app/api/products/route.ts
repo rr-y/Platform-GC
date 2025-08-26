@@ -10,8 +10,6 @@ const store: Product[] = [
 
 
 
-
-
 export async function GET() {
   return NextResponse.json(store);
 }

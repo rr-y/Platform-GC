@@ -39,10 +39,23 @@ export default function POSPage() {
 
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
-  const submitOrder = () => {
-    alert("Order placed ✅");
+const submitOrder = async () => {
+  if (!cart.length) return;
+  const items = cart.map(({ name, sku, price, quantity }) => ({ name, sku, price, quantity }));
+  const res = await fetch("/api/orders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(items)
+  });
+
+  if (res.ok) {
+    alert("✅ Bill submitted!");
     setCart([]);
-  };
+  } else {
+    alert("❌ Failed to submit");
+  }
+};
+
 
   return (
     <main className="max-w-6xl mx-auto p-4 space-y-6">
