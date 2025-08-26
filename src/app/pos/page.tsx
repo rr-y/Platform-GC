@@ -1,5 +1,7 @@
 'use client';
 import { useEffect, useState } from "react";
+import toast from "react-hot-toast";
+
 
 type Product = { name: string; sku: string; price: number; stock: number; shop: string };
 type CartItem = Product & { quantity: number };
@@ -38,10 +40,17 @@ export default function POSPage() {
   };
 
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const [isLoading, setIsLoading] = useState(false);
 
-const submitOrder = async () => {
+  const submitOrder = async () => {
   if (!cart.length) return;
-  const items = cart.map(({ name, sku, price, quantity }) => ({ name, sku, price, quantity }));
+
+  setIsLoading(true); // start loading
+
+  const items = cart.map(({ name, sku, price, quantity }) => ({
+    name, sku, price, quantity
+  }));
+
   const res = await fetch("/api/orders", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -49,12 +58,15 @@ const submitOrder = async () => {
   });
 
   if (res.ok) {
-    alert("✅ Bill submitted!");
+    toast.success("✅ Bill submitted!");
     setCart([]);
   } else {
-    alert("❌ Failed to submit");
+    toast.error("❌ Failed to submit bill");
   }
+
+  setIsLoading(false); // stop loading
 };
+
 
 
   return (
@@ -124,9 +136,13 @@ const submitOrder = async () => {
             </table>
           )}
 
-          <button disabled={!cart.length} onClick={submitOrder} className="btn w-full">
-            Submit Bill
-          </button>
+            <button
+                disabled={!cart.length || isLoading}
+                onClick={submitOrder}
+                className="btn w-full h-12 text-base"
+                >
+                {isLoading ? "Submitting..." : "Submit Bill"}
+            </button>
         </div>
       </div>
     </main>
