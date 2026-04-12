@@ -3,12 +3,11 @@ import logging
 import secrets
 from datetime import timedelta
 
+import asyncpg
 from redis.asyncio import Redis
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models import NotificationLog, User, utcnow
+from app.models import new_uuid, utcnow
 from app.utils.security import create_access_token, create_refresh_token
 
 logger = logging.getLogger(__name__)
@@ -36,17 +35,14 @@ async def request_otp(mobile: str, redis: Redis) -> None:
     pipe.expire(count_key, settings.OTP_RATE_WINDOW_SECONDS)
     await pipe.execute()
 
-    # Send OTP asynchronously (fire and forget — don't block API response)
     try:
         from app.services.notifications import send_otp
         await send_otp(mobile, otp)
     except Exception as e:
         logger.error("OTP send failed for %s: %s", mobile, e)
-        # Don't raise — OTP is stored, user can retry sending
 
 
 async def verify_otp(mobile: str, otp: str, redis: Redis) -> bool:
-    """Verify OTP from Redis. Returns True on success, False on failure."""
     stored = await redis.get(OTP_KEY.format(mobile))
     if not stored:
         return False
@@ -56,33 +52,37 @@ async def verify_otp(mobile: str, otp: str, redis: Redis) -> bool:
     return True
 
 
-# ── User upsert ───────────────────────────────────────────────────────────────
+# ── User ──────────────────────────────────────────────────────────────────────
 
-async def get_or_create_user(mobile: str, db: AsyncSession) -> User:
-    result = await db.execute(select(User).where(User.mobile_number == mobile))
-    user = result.scalar_one_or_none()
-    if not user:
-        user = User(mobile_number=mobile)
-        db.add(user)
-        await db.commit()
-        await db.refresh(user)
-        logger.info("New user created: %s", user.id)
-    return user
+async def get_or_create_user(mobile: str, conn: asyncpg.Connection) -> dict:
+    row = await conn.fetchrow(
+        "SELECT id, mobile_number, name, role, is_active FROM users WHERE mobile_number = $1",
+        mobile,
+    )
+    if row:
+        return dict(row)
+
+    uid = new_uuid()
+    await conn.execute(
+        """INSERT INTO users (id, mobile_number, role, is_active, created_at)
+           VALUES ($1, $2, 'user', true, $3)""",
+        uid, mobile, utcnow(),
+    )
+    logger.info("New user created: %s", uid)
+    return {"id": uid, "mobile_number": mobile, "name": None, "role": "user", "is_active": True}
 
 
 # ── JWT ───────────────────────────────────────────────────────────────────────
 
-async def issue_tokens(user: User, redis: Redis) -> tuple[str, str]:
-    """Issue access + refresh tokens. Stores refresh JTI in Redis."""
-    access_token = create_access_token(user.id, user.role)
-    refresh_token, jti = create_refresh_token(user.id)
+async def issue_tokens(user: dict, redis: Redis) -> tuple[str, str]:
+    access_token = create_access_token(user["id"], user["role"])
+    refresh_token, jti = create_refresh_token(user["id"])
     ttl = int(timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS).total_seconds())
-    await redis.set(REFRESH_KEY.format(jti), user.id, ex=ttl)
+    await redis.set(REFRESH_KEY.format(jti), user["id"], ex=ttl)
     return access_token, refresh_token
 
 
-async def refresh_access_token(refresh_token: str, redis: Redis, db: AsyncSession) -> str:
-    """Validate refresh token, return new access token."""
+async def refresh_access_token(refresh_token: str, redis: Redis, conn: asyncpg.Connection) -> str:
     from app.utils.security import decode_token
     payload = decode_token(refresh_token)
     if not payload or payload.get("type") != "refresh":
@@ -93,16 +93,16 @@ async def refresh_access_token(refresh_token: str, redis: Redis, db: AsyncSessio
     if not user_id:
         raise AuthError("Refresh token expired or revoked")
 
-    result = await db.execute(select(User).where(User.id == user_id, User.is_active == True))
-    user = result.scalar_one_or_none()
-    if not user:
+    row = await conn.fetchrow(
+        "SELECT id, role FROM users WHERE id = $1 AND is_active = true", user_id
+    )
+    if not row:
         raise AuthError("User not found")
 
-    return create_access_token(user.id, user.role)
+    return create_access_token(row["id"], row["role"])
 
 
 async def logout(refresh_token: str, redis: Redis) -> None:
-    """Blacklist refresh token by deleting its JTI from Redis."""
     from app.utils.security import decode_token
     payload = decode_token(refresh_token)
     if payload and payload.get("jti"):

@@ -1,6 +1,8 @@
 import logging
+from datetime import timedelta
 
 from app.config import settings
+from app.models import new_uuid, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +47,6 @@ async def _send_sms(mobile: str, message: str) -> None:
 
 
 async def send_expiry_reminder(mobile: str, coins: int, expiry_date: str) -> None:
-    """Send coin expiry reminder via WhatsApp/SMS."""
     message = (
         f"Hi! Your {coins} reward coins expire on {expiry_date}. "
         f"Use them on your next purchase before they expire!"
@@ -60,7 +61,6 @@ async def send_expiry_reminder(mobile: str, coins: int, expiry_date: str) -> Non
 
 
 async def send_campaign_message(mobile: str, title: str, message_body: str) -> None:
-    """Send campaign/offer notification."""
     if settings.TWILIO_WHATSAPP_FROM:
         try:
             await _send_whatsapp(mobile, message_body)
@@ -72,58 +72,48 @@ async def send_campaign_message(mobile: str, title: str, message_body: str) -> N
 
 async def dispatch_expiry_notification(user_id: str) -> None:
     """Send coins expiry reminder to a user. Called by APScheduler job."""
-    from datetime import timezone
-    from sqlalchemy import func, select
-    from app.database import AsyncSessionLocal
-    from app.models import CoinsLedger, User, utcnow
+    from app.database import get_pool
 
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(select(User).where(User.id == user_id))
-        user = result.scalar_one_or_none()
+    async with get_pool().acquire() as conn:
+        user = await conn.fetchrow(
+            "SELECT id, mobile_number FROM users WHERE id = $1", user_id
+        )
         if not user:
             return
 
         now = utcnow()
-        from datetime import timedelta
         window = now + timedelta(days=settings.EXPIRY_NOTIFY_DAYS)
 
-        coins_result = await db.execute(
-            select(func.sum(CoinsLedger.coins), func.min(CoinsLedger.expiry_at))
-            .where(
-                CoinsLedger.user_id == user_id,
-                CoinsLedger.status == "active",
-                CoinsLedger.type == "earned",
-                CoinsLedger.expiry_at > now,
-                CoinsLedger.expiry_at <= window,
-            )
+        row = await conn.fetchrow(
+            """SELECT COALESCE(SUM(coins), 0) AS total, MIN(expiry_at) AS earliest
+               FROM coins_ledger
+               WHERE user_id = $1
+                 AND status = 'active'
+                 AND type = 'earned'
+                 AND expiry_at > $2
+                 AND expiry_at <= $3""",
+            user_id, now, window,
         )
-        row = coins_result.one()
-        total_expiring, earliest_expiry = row
 
-        if not total_expiring or total_expiring <= 0:
+        if not row or not row["total"] or int(row["total"]) <= 0:
             return
 
-        expiry_str = earliest_expiry.strftime("%d %b %Y")
+        expiry_str = row["earliest"].strftime("%d %b %Y")
+        channel = "whatsapp" if settings.TWILIO_WHATSAPP_FROM else "sms"
+
         try:
-            await send_expiry_reminder(user.mobile_number, total_expiring, expiry_str)
-            from app.models import NotificationLog
-            log = NotificationLog(
-                user_id=user_id,
-                channel="whatsapp" if settings.TWILIO_WHATSAPP_FROM else "sms",
-                type="coins_expiry",
-                status="sent",
-            )
-            db.add(log)
-            await db.commit()
+            await send_expiry_reminder(user["mobile_number"], int(row["total"]), expiry_str)
+            log_status = "sent"
+            log_error = None
         except Exception as e:
             logger.error("Expiry notification failed for user %s: %s", user_id, e)
-            from app.models import NotificationLog
-            log = NotificationLog(
-                user_id=user_id,
-                channel="sms",
-                type="coins_expiry",
-                status="failed",
-                error_detail=str(e),
-            )
-            db.add(log)
-            await db.commit()
+            log_status = "failed"
+            log_error = str(e)
+
+        await conn.execute(
+            """INSERT INTO notification_logs
+                   (id, user_id, channel, type, status, error_detail, sent_at, created_at)
+               VALUES ($1,$2,$3,'coins_expiry',$4,$5,$6,$7)""",
+            new_uuid(), user_id, channel, log_status, log_error,
+            now if log_status == "sent" else None, now,
+        )

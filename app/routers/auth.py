@@ -1,8 +1,8 @@
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_conn
 from app.redis import get_redis
 from app.schemas import (
     AccessTokenOut,
@@ -41,28 +41,28 @@ async def otp_request(
     return OtpRequestOut(message="OTP sent", expires_in_seconds=settings.OTP_EXPIRE_SECONDS)
 
 
-@router.post("/otp/verify", response_model=TokenOut)
+@router.post("/otp/verify", response_model=TokenOut, status_code=status.HTTP_201_CREATED)
 async def otp_verify(
     body: OtpVerifyIn,
-    db: AsyncSession = Depends(get_db),
+    conn: asyncpg.Connection = Depends(get_conn),
     redis: Redis = Depends(get_redis),
 ):
     valid = await verify_otp(body.mobile_number, body.otp, redis)
     if not valid:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired OTP")
 
-    user = await get_or_create_user(body.mobile_number, db)
+    user = await get_or_create_user(body.mobile_number, conn)
     access_token, refresh_token = await issue_tokens(user, redis)
-    balance = await get_balance(user.id, db)
+    balance = await get_balance(user["id"], conn)
 
     return TokenOut(
         access_token=access_token,
         refresh_token=refresh_token,
         user=UserOut(
-            user_id=user.id,
-            mobile_number=user.mobile_number,
-            name=user.name,
-            role=user.role,
+            user_id=user["id"],
+            mobile_number=user["mobile_number"],
+            name=user["name"],
+            role=user["role"],
             coin_balance=balance,
         ),
     )
@@ -71,11 +71,11 @@ async def otp_verify(
 @router.post("/token/refresh", response_model=AccessTokenOut)
 async def token_refresh(
     body: RefreshIn,
-    db: AsyncSession = Depends(get_db),
+    conn: asyncpg.Connection = Depends(get_conn),
     redis: Redis = Depends(get_redis),
 ):
     try:
-        access_token = await refresh_access_token(body.refresh_token, redis, db)
+        access_token = await refresh_access_token(body.refresh_token, redis, conn)
     except AuthError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
     return AccessTokenOut(access_token=access_token)

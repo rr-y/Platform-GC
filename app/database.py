@@ -1,12 +1,36 @@
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
+import asyncpg
 from app.config import settings
 
-engine = create_async_engine(settings.DATABASE_URL, pool_size=10, max_overflow=20)
-
-AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+_pool: asyncpg.Pool | None = None
 
 
-async def get_db():
-    async with AsyncSessionLocal() as session:
-        yield session
+def _pg_url(url: str) -> str:
+    """Strip SQLAlchemy driver prefix so asyncpg can use the URL."""
+    return url.replace("postgresql+asyncpg://", "postgresql://")
+
+
+async def init_pool() -> None:
+    global _pool
+    _pool = await asyncpg.create_pool(
+        _pg_url(settings.DATABASE_URL),
+        min_size=2,
+        max_size=10,
+    )
+
+
+async def close_pool() -> None:
+    global _pool
+    if _pool:
+        await _pool.close()
+        _pool = None
+
+
+def get_pool() -> asyncpg.Pool:
+    assert _pool is not None, "DB pool not initialised — call init_pool() in app lifespan"
+    return _pool
+
+
+async def get_conn():
+    """FastAPI dependency: yields an asyncpg connection from the pool."""
+    async with get_pool().acquire() as conn:
+        yield conn

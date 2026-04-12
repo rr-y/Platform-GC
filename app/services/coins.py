@@ -1,47 +1,38 @@
-from datetime import timezone
-from math import floor
+from datetime import timedelta
 
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+import asyncpg
 
 from app.config import settings
-from app.models import CoinsLedger, utcnow
+from app.models import new_uuid, utcnow
 
 
-async def get_balance(user_id: str, db: AsyncSession) -> int:
-    """Return net active coin balance (earned - redeemed, non-expired)."""
-    now = utcnow()
-    result = await db.execute(
-        select(func.coalesce(func.sum(CoinsLedger.coins), 0)).where(
-            CoinsLedger.user_id == user_id,
-            CoinsLedger.status == "active",
-            CoinsLedger.expiry_at > now,
-        )
+async def get_balance(user_id: str, conn: asyncpg.Connection) -> int:
+    """Net active coin balance: SUM(coins) WHERE status=active AND expiry_at > NOW()."""
+    val = await conn.fetchval(
+        """SELECT COALESCE(SUM(coins), 0)
+           FROM coins_ledger
+           WHERE user_id = $1 AND status = 'active' AND expiry_at > NOW()""",
+        user_id,
     )
-    return int(result.scalar())
+    return int(val or 0)
 
 
 async def award_coins(
     user_id: str,
     coins: int,
     reference_id: str,
-    db: AsyncSession,
-) -> CoinsLedger:
-    """Create an earned coins ledger entry. redeemable_after = now+1s (blocks same-txn redeem)."""
-    from datetime import timedelta
+    conn: asyncpg.Connection,
+) -> None:
+    """Insert an earned coins ledger entry. redeemable_after=now+1s blocks same-txn redeem."""
     now = utcnow()
-    entry = CoinsLedger(
-        user_id=user_id,
-        coins=coins,
-        type="earned",
-        status="active",
-        reference_id=reference_id,
-        issued_at=now,
-        expiry_at=now + timedelta(days=settings.COINS_EXPIRY_DAYS),
-        redeemable_after=now + timedelta(seconds=1),
+    await conn.execute(
+        """INSERT INTO coins_ledger
+               (id, user_id, coins, type, status, reference_id, issued_at, expiry_at, redeemable_after)
+           VALUES ($1, $2, $3, 'earned', 'active', $4, $5, $6, $7)""",
+        new_uuid(), user_id, coins, reference_id, now,
+        now + timedelta(days=settings.COINS_EXPIRY_DAYS),
+        now + timedelta(seconds=1),
     )
-    db.add(entry)
-    return entry
 
 
 async def redeem_coins(
@@ -49,62 +40,51 @@ async def redeem_coins(
     coins: int,
     transaction_id: str,
     txn_start: object,
-    db: AsyncSession,
+    conn: asyncpg.Connection,
 ) -> None:
-    """Insert a negative ledger row to record redemption. Validates balance first."""
-    now = utcnow()
-
-    # Only count coins that were issued before this transaction started
-    result = await db.execute(
-        select(func.coalesce(func.sum(CoinsLedger.coins), 0)).where(
-            CoinsLedger.user_id == user_id,
-            CoinsLedger.status == "active",
-            CoinsLedger.expiry_at > now,
-            CoinsLedger.redeemable_after < txn_start,
-        )
+    """Insert a negative ledger entry to record redemption. Validates available balance first."""
+    available = await conn.fetchval(
+        """SELECT COALESCE(SUM(coins), 0)
+           FROM coins_ledger
+           WHERE user_id = $1
+             AND status = 'active'
+             AND expiry_at > NOW()
+             AND redeemable_after < $2""",
+        user_id, txn_start,
     )
-    available = int(result.scalar())
-
+    available = int(available or 0)
     if coins > available:
         raise InsufficientCoinsError(f"Only {available} coins available for redemption")
 
-    from datetime import timedelta
-    entry = CoinsLedger(
-        user_id=user_id,
-        coins=-coins,
-        type="redeemed",
-        status="active",         # stays active so SUM includes negative value
-        reference_id=transaction_id,
-        issued_at=now,
-        expiry_at=now + timedelta(days=36500),  # far future — never expires
-        redeemable_after=now,
+    now = utcnow()
+    await conn.execute(
+        """INSERT INTO coins_ledger
+               (id, user_id, coins, type, status, reference_id, issued_at, expiry_at, redeemable_after)
+           VALUES ($1, $2, $3, 'redeemed', 'active', $4, $5, $6, $7)""",
+        new_uuid(), user_id, -coins, transaction_id, now,
+        now + timedelta(days=36500),
+        now,
     )
-    db.add(entry)
 
 
-async def get_expiring_soon(user_id: str, db: AsyncSession) -> dict | None:
-    """Return total coins and earliest expiry within the notification window."""
-    from datetime import timedelta
+async def get_expiring_soon(user_id: str, conn: asyncpg.Connection) -> dict | None:
+    """Return total coins and earliest expiry within EXPIRY_NOTIFY_DAYS window."""
     now = utcnow()
     window = now + timedelta(days=settings.EXPIRY_NOTIFY_DAYS)
 
-    result = await db.execute(
-        select(
-            func.coalesce(func.sum(CoinsLedger.coins), 0),
-            func.min(CoinsLedger.expiry_at),
-        ).where(
-            CoinsLedger.user_id == user_id,
-            CoinsLedger.status == "active",
-            CoinsLedger.type == "earned",
-            CoinsLedger.expiry_at > now,
-            CoinsLedger.expiry_at <= window,
-        )
+    row = await conn.fetchrow(
+        """SELECT COALESCE(SUM(coins), 0) AS total, MIN(expiry_at) AS earliest
+           FROM coins_ledger
+           WHERE user_id = $1
+             AND status = 'active'
+             AND type = 'earned'
+             AND expiry_at > $2
+             AND expiry_at <= $3""",
+        user_id, now, window,
     )
-    row = result.one()
-    total, earliest = row
-    if not total or total <= 0:
+    if not row or not row["total"] or int(row["total"]) <= 0:
         return None
-    return {"coins": int(total), "expiry_at": earliest.isoformat()}
+    return {"coins": int(row["total"]), "expiry_at": row["earliest"].isoformat()}
 
 
 class InsufficientCoinsError(Exception):

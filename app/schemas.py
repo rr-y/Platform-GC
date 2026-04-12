@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, field_validator
 import phonenumbers
 
@@ -169,8 +171,8 @@ class CampaignIn(BaseModel):
     discount_value: float | None = None
     min_order_value: float = 0
     max_discount_cap: float | None = None
-    valid_from: str
-    valid_to: str
+    valid_from: datetime
+    valid_to: datetime
     audience_type: str = "all"
     usage_limit: int | None = None
 
