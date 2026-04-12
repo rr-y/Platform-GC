@@ -1,12 +1,9 @@
-from datetime import datetime, timezone
-
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_conn
 from app.deps import require_admin
-from app.models import Campaign, Coupon, User, utcnow
+from app.models import new_uuid, utcnow
 from app.schemas import (
     CampaignIn,
     CampaignOut,
@@ -24,108 +21,107 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 @router.post("/campaigns", response_model=CampaignOut, status_code=status.HTTP_201_CREATED)
 async def create_campaign(
     body: CampaignIn,
-    _: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
 ):
-    campaign = Campaign(
-        title=body.title,
-        type=body.type,
-        discount_value=body.discount_value,
-        min_order_value=body.min_order_value,
-        max_discount_cap=body.max_discount_cap,
-        valid_from=datetime.fromisoformat(body.valid_from),
-        valid_to=datetime.fromisoformat(body.valid_to),
-        audience_type=body.audience_type,
-        usage_limit=body.usage_limit,
+    cid = new_uuid()
+    await conn.execute(
+        """INSERT INTO campaigns
+               (id, title, type, discount_value, min_order_value, max_discount_cap,
+                valid_from, valid_to, is_active, audience_type, usage_limit, usage_count, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,$9,$10,0,$11)""",
+        cid, body.title, body.type, body.discount_value,
+        body.min_order_value or 0, body.max_discount_cap,
+        body.valid_from, body.valid_to,
+        body.audience_type, body.usage_limit, utcnow(),
     )
-    db.add(campaign)
-    await db.commit()
-    await db.refresh(campaign)
-    return _campaign_out(campaign)
+    row = await conn.fetchrow("SELECT * FROM campaigns WHERE id = $1", cid)
+    return _campaign_out(row)
 
 
 @router.get("/campaigns", response_model=list[CampaignOut])
 async def list_campaigns(
     active_only: bool = Query(False),
-    _: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
 ):
-    query = select(Campaign)
+    sql = "SELECT * FROM campaigns"
     if active_only:
-        query = query.where(Campaign.is_active == True)
-    result = await db.execute(query.order_by(Campaign.created_at.desc()))
-    return [_campaign_out(c) for c in result.scalars().all()]
+        sql += " WHERE is_active = true"
+    sql += " ORDER BY created_at DESC"
+    rows = await conn.fetch(sql)
+    return [_campaign_out(r) for r in rows]
 
 
 @router.get("/campaigns/{campaign_id}", response_model=CampaignOut)
 async def get_campaign(
     campaign_id: str,
-    _: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
 ):
-    campaign = await db.get(Campaign, campaign_id)
-    if not campaign:
+    row = await conn.fetchrow("SELECT * FROM campaigns WHERE id = $1", campaign_id)
+    if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found")
-    return _campaign_out(campaign)
+    return _campaign_out(row)
 
 
 @router.patch("/campaigns/{campaign_id}", response_model=CampaignOut)
 async def update_campaign(
     campaign_id: str,
     body: dict,
-    _: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
 ):
-    campaign = await db.get(Campaign, campaign_id)
-    if not campaign:
+    row = await conn.fetchrow("SELECT id FROM campaigns WHERE id = $1", campaign_id)
+    if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found")
 
     allowed = {"title", "discount_value", "min_order_value", "max_discount_cap",
                "valid_from", "valid_to", "is_active", "audience_type", "usage_limit"}
-    for key, value in body.items():
-        if key in allowed:
-            if key in ("valid_from", "valid_to") and isinstance(value, str):
-                value = datetime.fromisoformat(value)
-            setattr(campaign, key, value)
+    updates = {k: v for k, v in body.items() if k in allowed}
+    if not updates:
+        row = await conn.fetchrow("SELECT * FROM campaigns WHERE id = $1", campaign_id)
+        return _campaign_out(row)
 
-    await db.commit()
-    await db.refresh(campaign)
-    return _campaign_out(campaign)
+    set_clause = ", ".join(f"{k} = ${i+2}" for i, k in enumerate(updates))
+    await conn.execute(
+        f"UPDATE campaigns SET {set_clause} WHERE id = $1",
+        campaign_id, *updates.values(),
+    )
+    row = await conn.fetchrow("SELECT * FROM campaigns WHERE id = $1", campaign_id)
+    return _campaign_out(row)
 
 
 @router.delete("/campaigns/{campaign_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def deactivate_campaign(
     campaign_id: str,
-    _: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
 ):
-    campaign = await db.get(Campaign, campaign_id)
-    if not campaign:
+    row = await conn.fetchrow("SELECT id FROM campaigns WHERE id = $1", campaign_id)
+    if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found")
-    campaign.is_active = False
-    await db.commit()
+    await conn.execute("UPDATE campaigns SET is_active = false WHERE id = $1", campaign_id)
 
 
 @router.post("/campaigns/{campaign_id}/notify", status_code=status.HTTP_202_ACCEPTED)
 async def blast_campaign_notification(
     campaign_id: str,
-    _: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
 ):
-    """Trigger notification blast to campaign audience."""
-    campaign = await db.get(Campaign, campaign_id)
+    campaign = await conn.fetchrow("SELECT * FROM campaigns WHERE id = $1", campaign_id)
     if not campaign:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found")
 
     from app.services.notifications import send_campaign_message
-    result = await db.execute(select(User).where(User.is_active == True))
-    users = result.scalars().all()
+    users = await conn.fetch("SELECT mobile_number FROM users WHERE is_active = true")
 
     sent = 0
     for user in users:
         try:
-            msg = f"🎉 {campaign.title} — Don't miss out! Valid till {campaign.valid_to.strftime('%d %b %Y')}."
-            await send_campaign_message(user.mobile_number, campaign.title, msg)
+            msg = f"🎉 {campaign['title']} — Don't miss out! Valid till {campaign['valid_to'].strftime('%d %b %Y')}."
+            await send_campaign_message(user["mobile_number"], campaign["title"], msg)
             sent += 1
         except Exception:
             pass
@@ -137,28 +133,28 @@ async def blast_campaign_notification(
 async def add_coupons(
     campaign_id: str,
     body: CouponAddIn,
-    _: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
 ):
-    campaign = await db.get(Campaign, campaign_id)
+    campaign = await conn.fetchrow(
+        "SELECT id, valid_from, valid_to FROM campaigns WHERE id = $1", campaign_id
+    )
     if not campaign:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found")
 
     created = []
     for code in body.codes:
-        coupon = Coupon(
-            campaign_id=campaign_id,
-            code=code.upper().strip(),
-            is_auto_apply=body.is_auto_apply,
-            max_uses=body.max_uses,
-            per_user_limit=body.per_user_limit,
-            valid_from=campaign.valid_from,
-            valid_to=campaign.valid_to,
+        code_upper = code.upper().strip()
+        await conn.execute(
+            """INSERT INTO coupons
+                   (id, campaign_id, code, is_auto_apply, max_uses, uses_count, per_user_limit, valid_from, valid_to)
+               VALUES ($1,$2,$3,$4,$5,0,$6,$7,$8)""",
+            new_uuid(), campaign_id, code_upper, body.is_auto_apply,
+            body.max_uses, body.per_user_limit,
+            campaign["valid_from"], campaign["valid_to"],
         )
-        db.add(coupon)
-        created.append(code.upper().strip())
+        created.append(code_upper)
 
-    await db.commit()
     return {"created": created, "count": len(created)}
 
 
@@ -169,50 +165,54 @@ async def list_users(
     search: str = Query(""),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
-    _: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
 ):
     offset = (page - 1) * limit
-    query = select(User)
     if search:
-        query = query.where(User.mobile_number.contains(search))
-    query = query.offset(offset).limit(limit)
-    result = await db.execute(query)
-    users = result.scalars().all()
+        rows = await conn.fetch(
+            "SELECT * FROM users WHERE mobile_number LIKE $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+            f"%{search}%", limit, offset,
+        )
+    else:
+        rows = await conn.fetch(
+            "SELECT * FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2",
+            limit, offset,
+        )
 
-    out = []
-    for u in users:
-        balance = await get_balance(u.id, db)
-        out.append(UserAdminOut(
-            user_id=u.id,
-            mobile_number=u.mobile_number,
-            name=u.name,
-            role=u.role,
-            is_active=u.is_active,
+    result = []
+    for u in rows:
+        balance = await get_balance(u["id"], conn)
+        result.append(UserAdminOut(
+            user_id=u["id"],
+            mobile_number=u["mobile_number"],
+            name=u["name"],
+            role=u["role"],
+            is_active=u["is_active"],
             coin_balance=balance,
-            created_at=u.created_at.isoformat(),
+            created_at=u["created_at"].isoformat(),
         ))
-    return out
+    return result
 
 
 @router.get("/users/{user_id}", response_model=UserAdminOut)
 async def get_user(
     user_id: str,
-    _: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
 ):
-    user = await db.get(User, user_id)
-    if not user:
+    row = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+    if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    balance = await get_balance(user.id, db)
+    balance = await get_balance(row["id"], conn)
     return UserAdminOut(
-        user_id=user.id,
-        mobile_number=user.mobile_number,
-        name=user.name,
-        role=user.role,
-        is_active=user.is_active,
+        user_id=row["id"],
+        mobile_number=row["mobile_number"],
+        name=row["name"],
+        role=row["role"],
+        is_active=row["is_active"],
         coin_balance=balance,
-        created_at=user.created_at.isoformat(),
+        created_at=row["created_at"].isoformat(),
     )
 
 
@@ -220,50 +220,43 @@ async def get_user(
 async def adjust_coins(
     user_id: str,
     body: CoinAdjustIn,
-    admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
+    admin: dict = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
 ):
-    user = await db.get(User, user_id)
-    if not user:
+    row = await conn.fetchrow("SELECT id FROM users WHERE id = $1", user_id)
+    if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     if body.coins == 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Coins must be non-zero")
 
-    from app.models import CoinsLedger
     from datetime import timedelta
     now = utcnow()
+    expiry = now + timedelta(days=36500) if body.coins < 0 else now + timedelta(days=365)
 
-    entry = CoinsLedger(
-        user_id=user_id,
-        coins=body.coins,
-        type="adjusted",
-        status="active",
-        reference_id=admin.id,
-        issued_at=now,
-        expiry_at=now + timedelta(days=36500) if body.coins < 0 else now + timedelta(days=365),
-        redeemable_after=now,
+    await conn.execute(
+        """INSERT INTO coins_ledger
+               (id, user_id, coins, type, status, reference_id, issued_at, expiry_at, redeemable_after)
+           VALUES ($1,$2,$3,'adjusted','active',$4,$5,$6,$7)""",
+        new_uuid(), user_id, body.coins, admin["id"], now, expiry, now,
     )
-    db.add(entry)
-    await db.commit()
-
-    balance = await get_balance(user_id, db)
+    balance = await get_balance(user_id, conn)
     return {"user_id": user_id, "adjustment": body.coins, "balance_after": balance}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _campaign_out(c: Campaign) -> CampaignOut:
+def _campaign_out(row) -> CampaignOut:
     return CampaignOut(
-        id=c.id,
-        title=c.title,
-        type=c.type,
-        discount_value=float(c.discount_value) if c.discount_value else None,
-        min_order_value=float(c.min_order_value),
-        max_discount_cap=float(c.max_discount_cap) if c.max_discount_cap else None,
-        valid_from=c.valid_from.isoformat(),
-        valid_to=c.valid_to.isoformat(),
-        is_active=c.is_active,
-        audience_type=c.audience_type,
-        usage_limit=c.usage_limit,
-        usage_count=c.usage_count,
+        id=row["id"],
+        title=row["title"],
+        type=row["type"],
+        discount_value=float(row["discount_value"]) if row["discount_value"] else None,
+        min_order_value=float(row["min_order_value"]),
+        max_discount_cap=float(row["max_discount_cap"]) if row["max_discount_cap"] else None,
+        valid_from=row["valid_from"].isoformat(),
+        valid_to=row["valid_to"].isoformat(),
+        is_active=row["is_active"],
+        audience_type=row["audience_type"],
+        usage_limit=row["usage_limit"],
+        usage_count=row["usage_count"],
     )

@@ -1,12 +1,11 @@
 import logging
-from datetime import timezone
+from decimal import Decimal
 from math import floor
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+import asyncpg
 
 from app.config import settings
-from app.models import Coupon, CouponRedemption, Transaction, utcnow
+from app.models import new_uuid, utcnow
 from app.services.coins import InsufficientCoinsError, award_coins, get_balance, redeem_coins
 
 logger = logging.getLogger(__name__)
@@ -15,7 +14,7 @@ logger = logging.getLogger(__name__)
 async def create_transaction(
     user_id: str,
     amount: float,
-    db: AsyncSession,
+    conn: asyncpg.Connection,
     order_ref: str | None = None,
     coins_to_redeem: int = 0,
     coupon_code: str | None = None,
@@ -24,103 +23,82 @@ async def create_transaction(
 
     # ── 1. Idempotency ────────────────────────────────────────────────────────
     if order_ref:
-        existing = await db.execute(
-            select(Transaction).where(Transaction.order_ref == order_ref)
+        existing = await conn.fetchrow(
+            "SELECT * FROM transactions WHERE order_ref = $1", order_ref
         )
-        txn = existing.scalar_one_or_none()
-        if txn:
-            balance = await get_balance(user_id, db)
-            return _format_result(txn, balance)
+        if existing:
+            balance = await get_balance(user_id, conn)
+            return _format_row(existing, balance)
 
     # ── 2. Coupon validation ──────────────────────────────────────────────────
     coupon_discount = 0.0
     coupon_id = None
     if coupon_code:
-        coupon, discount = await _apply_coupon(coupon_code, user_id, amount, db)
-        coupon_discount = discount
-        coupon_id = coupon.id
+        from app.services.campaigns import validate_coupon
+        coupon, coupon_discount = await validate_coupon(coupon_code, user_id, amount, conn)
+        coupon_id = coupon["id"]
 
     # ── 3. Coin redemption cap ────────────────────────────────────────────────
     if coins_to_redeem > 0:
-        max_inr = amount * settings.MAX_COINS_REDEEM_PERCENT
-        max_coins = floor(max_inr / settings.COIN_RUPEE_VALUE)
+        max_coins = floor(amount * settings.MAX_COINS_REDEEM_PERCENT / settings.COIN_RUPEE_VALUE)
         coins_to_redeem = min(coins_to_redeem, max_coins)
 
     # ── 4. Final amount & coins to earn ──────────────────────────────────────
     coin_discount = coins_to_redeem * settings.COIN_RUPEE_VALUE
     final_amount = max(0.0, amount - coupon_discount - coin_discount)
     coins_earned = floor(final_amount * settings.COINS_EARN_RATE / 100)
+    total_discount = round(coupon_discount + coin_discount, 2)
 
     # ── 5. Atomic DB write ────────────────────────────────────────────────────
-    txn = Transaction(
-        user_id=user_id,
-        order_ref=order_ref,
-        amount=amount,
-        coins_earned=coins_earned,
-        coins_used=coins_to_redeem,
-        discount_amount=round(coupon_discount + coin_discount, 2),
-        coupon_id=coupon_id,
-        status="completed",
-    )
-    db.add(txn)
-    await db.flush()  # get txn.id before inserting ledger rows
+    txn_id = new_uuid()
+    async with conn.transaction():
+        await conn.execute(
+            """INSERT INTO transactions
+                   (id, user_id, order_ref, amount, coins_earned, coins_used,
+                    discount_amount, coupon_id, status, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'completed', $9)""",
+            txn_id, user_id, order_ref, amount, coins_earned, coins_to_redeem,
+            total_discount, coupon_id, utcnow(),
+        )
 
-    if coins_to_redeem > 0:
-        try:
-            await redeem_coins(user_id, coins_to_redeem, txn.id, txn_start, db)
-        except InsufficientCoinsError as e:
-            await db.rollback()
-            raise e
+        if coins_to_redeem > 0:
+            await redeem_coins(user_id, coins_to_redeem, txn_id, txn_start, conn)
 
-    if coins_earned > 0:
-        await award_coins(user_id, coins_earned, txn.id, db)
+        if coins_earned > 0:
+            await award_coins(user_id, coins_earned, txn_id, conn)
 
-    # Increment coupon usage
-    if coupon_id:
-        coupon_row = await db.get(Coupon, coupon_id)
-        if coupon_row:
-            coupon_row.uses_count += 1
-            redemption = CouponRedemption(
-                coupon_id=coupon_id,
-                user_id=user_id,
-                transaction_id=txn.id,
+        if coupon_id:
+            await conn.execute(
+                "UPDATE coupons SET uses_count = uses_count + 1 WHERE id = $1", coupon_id
             )
-            db.add(redemption)
+            await conn.execute(
+                """INSERT INTO coupon_redemptions (id, coupon_id, user_id, transaction_id, redeemed_at)
+                   VALUES ($1, $2, $3, $4, $5)""",
+                new_uuid(), coupon_id, user_id, txn_id, utcnow(),
+            )
 
-    await db.commit()
-    await db.refresh(txn)
-
-    balance = await get_balance(user_id, db)
-    return _format_result(txn, balance, coupon_discount=coupon_discount, coin_discount=coin_discount)
-
-
-async def _apply_coupon(
-    code: str,
-    user_id: str,
-    order_amount: float,
-    db: AsyncSession,
-) -> tuple[Coupon, float]:
-    """Validate coupon and return (coupon, discount_amount). Raises ValueError on invalid."""
-    from app.services.campaigns import validate_coupon
-    return await validate_coupon(code, user_id, order_amount, db)
+    txn = await conn.fetchrow("SELECT * FROM transactions WHERE id = $1", txn_id)
+    balance = await get_balance(user_id, conn)
+    return _format_row(txn, balance, coupon_discount=coupon_discount, coin_discount=coin_discount)
 
 
-def _format_result(
-    txn: Transaction,
+def _format_row(
+    row,
     balance_after: int,
     coupon_discount: float = 0.0,
     coin_discount: float = 0.0,
 ) -> dict:
-    total_discount = float(txn.discount_amount)
-    coin_discount = txn.coins_used * settings.COIN_RUPEE_VALUE
-    final_amount = max(0.0, float(txn.amount) - total_discount)
+    coins_used = row["coins_used"]
+    total_discount = float(row["discount_amount"] or 0)
+    coin_discount_val = coins_used * settings.COIN_RUPEE_VALUE
+    final_amount = max(0.0, float(row["amount"]) - total_discount)
     return {
-        "transaction_id": txn.id,
-        "amount": float(txn.amount),
-        "discount_applied": round(total_discount - coin_discount, 2),
-        "coins_redeemed": txn.coins_used,
-        "coins_redeemed_value": round(coin_discount, 2),
+        "transaction_id": row["id"],
+        "amount": float(row["amount"]),
+        "discount_applied": round(total_discount - coin_discount_val, 2),
+        "coins_redeemed": coins_used,
+        "coins_redeemed_value": round(coin_discount_val, 2),
         "final_amount": round(final_amount, 2),
-        "coins_earned": txn.coins_earned,
+        "coins_earned": row["coins_earned"],
         "coins_balance_after": balance_after,
     }

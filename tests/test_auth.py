@@ -2,7 +2,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.services.auth import OTP_KEY, OTP_REQ_COUNT_KEY, REFRESH_KEY
+from app.models import new_uuid
+from app.services.auth import OTP_KEY
 
 
 # ── OTP Request ───────────────────────────────────────────────────────────────
@@ -45,7 +46,7 @@ async def test_otp_verify_success(client, redis):
         "/api/v1/auth/otp/verify",
         json={"mobile_number": mobile, "otp": "123456"},
     )
-    assert response.status_code == 200
+    assert response.status_code == 201
     data = response.json()
     assert "access_token" in data
     assert "refresh_token" in data
@@ -84,10 +85,7 @@ async def test_otp_is_one_time_use(client, redis):
     assert response.status_code == 401
 
 
-async def test_otp_verify_creates_new_user(client, redis, db):
-    from sqlalchemy import select
-    from app.models import User
-
+async def test_otp_verify_creates_new_user(client, conn, redis):
     mobile = "+919123456789"
     await redis.set(OTP_KEY.format(mobile), "654321", ex=300)
 
@@ -95,27 +93,26 @@ async def test_otp_verify_creates_new_user(client, redis, db):
         "/api/v1/auth/otp/verify",
         json={"mobile_number": mobile, "otp": "654321"},
     )
-    assert response.status_code == 200
+    assert response.status_code == 201
 
-    result = await db.execute(select(User).where(User.mobile_number == mobile))
-    user = result.scalar_one_or_none()
-    assert user is not None
+    row = await conn.fetchrow("SELECT id FROM users WHERE mobile_number = $1", mobile)
+    assert row is not None
 
 
-async def test_otp_verify_returns_existing_user(client, redis, db):
-    from app.models import User
-
+async def test_otp_verify_returns_existing_user(client, conn, redis):
     mobile = "+919000000001"
-    existing = User(mobile_number=mobile, name="Test User")
-    db.add(existing)
-    await db.commit()
+    uid = new_uuid()
+    await conn.execute(
+        "INSERT INTO users (id, mobile_number, name, role, is_active, created_at) VALUES ($1,$2,'Test User','user',true,NOW())",
+        uid, mobile,
+    )
 
     await redis.set(OTP_KEY.format(mobile), "111222", ex=300)
     response = await client.post(
         "/api/v1/auth/otp/verify",
         json={"mobile_number": mobile, "otp": "111222"},
     )
-    assert response.status_code == 200
+    assert response.status_code == 201
     assert response.json()["user"]["name"] == "Test User"
 
 

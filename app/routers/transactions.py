@@ -1,10 +1,8 @@
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_conn
 from app.deps import get_current_user
-from app.models import Transaction, User
 from app.schemas import PaginatedTransactions, TransactionIn, TransactionItem, TransactionOut
 from app.services.coins import InsufficientCoinsError
 from app.services.transactions import create_transaction
@@ -15,14 +13,14 @@ router = APIRouter(prefix="/transactions", tags=["transactions"])
 @router.post("", response_model=TransactionOut, status_code=status.HTTP_201_CREATED)
 async def post_transaction(
     body: TransactionIn,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_conn),
 ):
     try:
         result = await create_transaction(
-            user_id=current_user.id,
+            user_id=current_user["id"],
             amount=body.amount,
-            db=db,
+            conn=conn,
             order_ref=body.order_ref,
             coins_to_redeem=body.coins_to_redeem,
             coupon_code=body.coupon_code,
@@ -37,26 +35,25 @@ async def post_transaction(
 @router.get("/{transaction_id}", response_model=TransactionItem)
 async def get_transaction(
     transaction_id: str,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_conn),
 ):
-    result = await db.execute(
-        select(Transaction).where(
-            Transaction.id == transaction_id,
-            Transaction.user_id == current_user.id,
-        )
+    row = await conn.fetchrow(
+        """SELECT id, amount, coins_earned, coins_used, discount_amount, status, created_at
+           FROM transactions
+           WHERE id = $1 AND user_id = $2""",
+        transaction_id, current_user["id"],
     )
-    txn = result.scalar_one_or_none()
-    if not txn:
+    if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
     return TransactionItem(
-        id=txn.id,
-        amount=float(txn.amount),
-        coins_earned=txn.coins_earned,
-        coins_used=txn.coins_used,
-        discount_amount=float(txn.discount_amount),
-        status=txn.status,
-        created_at=txn.created_at.isoformat(),
+        id=row["id"],
+        amount=float(row["amount"]),
+        coins_earned=row["coins_earned"],
+        coins_used=row["coins_used"],
+        discount_amount=float(row["discount_amount"]),
+        status=row["status"],
+        created_at=row["created_at"].isoformat(),
     )
 
 
@@ -64,33 +61,30 @@ async def get_transaction(
 async def list_transactions(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_conn),
 ):
     offset = (page - 1) * limit
-
-    count_result = await db.execute(
-        select(func.count()).where(Transaction.user_id == current_user.id)
+    total = await conn.fetchval(
+        "SELECT COUNT(*) FROM transactions WHERE user_id = $1", current_user["id"]
     )
-    total = count_result.scalar()
-
-    result = await db.execute(
-        select(Transaction)
-        .where(Transaction.user_id == current_user.id)
-        .order_by(Transaction.created_at.desc())
-        .offset(offset)
-        .limit(limit)
+    rows = await conn.fetch(
+        """SELECT id, amount, coins_earned, coins_used, discount_amount, status, created_at
+           FROM transactions
+           WHERE user_id = $1
+           ORDER BY created_at DESC
+           LIMIT $2 OFFSET $3""",
+        current_user["id"], limit, offset,
     )
-    rows = result.scalars().all()
     items = [
         TransactionItem(
-            id=r.id,
-            amount=float(r.amount),
-            coins_earned=r.coins_earned,
-            coins_used=r.coins_used,
-            discount_amount=float(r.discount_amount),
-            status=r.status,
-            created_at=r.created_at.isoformat(),
+            id=r["id"],
+            amount=float(r["amount"]),
+            coins_earned=r["coins_earned"],
+            coins_used=r["coins_used"],
+            discount_amount=float(r["discount_amount"]),
+            status=r["status"],
+            created_at=r["created_at"].isoformat(),
         )
         for r in rows
     ]

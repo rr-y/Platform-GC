@@ -1,21 +1,22 @@
 from datetime import timedelta
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from app.models import CoinsLedger, User, utcnow
+from app.models import new_uuid, utcnow
 from app.services.auth import OTP_KEY
 from app.services.coins import InsufficientCoinsError, award_coins, get_balance, redeem_coins
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-async def make_user(db, mobile="+919800000001"):
-    user = User(mobile_number=mobile)
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return user
+async def make_user(conn, mobile="+919800000001"):
+    uid = new_uuid()
+    await conn.execute(
+        "INSERT INTO users (id, mobile_number, role, is_active, created_at) VALUES ($1,$2,'user',true,NOW())",
+        uid, mobile,
+    )
+    return {"id": uid, "mobile_number": mobile, "name": None, "role": "user"}
 
 
 async def login(client, redis, mobile="+919800000001"):
@@ -29,109 +30,119 @@ async def login(client, redis, mobile="+919800000001"):
     return {"Authorization": f"Bearer {token}"}
 
 
+async def seed_coins(conn, user_id: str, coins: int, redeemable: bool = True):
+    """Insert a coins ledger entry, optionally already redeemable."""
+    now = utcnow()
+    offset = timedelta(days=1) if redeemable else timedelta(seconds=1)
+    await conn.execute(
+        """INSERT INTO coins_ledger
+               (id, user_id, coins, type, status, reference_id, issued_at, expiry_at, redeemable_after)
+           VALUES ($1,$2,$3,'earned','active','seed',$4,$5,$6)""",
+        new_uuid(), user_id, coins, now,
+        now + timedelta(days=365),
+        now - offset,
+    )
+
+
 # ── Balance ───────────────────────────────────────────────────────────────────
 
-async def test_balance_zero_new_user(db):
-    user = await make_user(db, "+919800000010")
-    assert await get_balance(user.id, db) == 0
+async def test_balance_zero_new_user(conn):
+    user = await make_user(conn, "+919800000010")
+    assert await get_balance(user["id"], conn) == 0
 
 
-async def test_balance_increases_on_earn(db):
-    user = await make_user(db, "+919800000011")
-    now = utcnow()
-    await award_coins(user.id, 100, "txn-1", db)
-    await db.commit()
-    assert await get_balance(user.id, db) == 100
+async def test_balance_increases_on_earn(conn):
+    user = await make_user(conn, "+919800000011")
+    await award_coins(user["id"], 100, "txn-1", conn)
+    assert await get_balance(user["id"], conn) == 100
 
 
-async def test_balance_decreases_on_redeem(db):
-    user = await make_user(db, "+919800000012")
-    now = utcnow()
-    await award_coins(user.id, 100, "txn-1", db)
-    await db.commit()
+async def test_balance_decreases_on_redeem(conn):
+    user = await make_user(conn, "+919800000012")
+    await award_coins(user["id"], 100, "txn-1", conn)
 
-    # Use a txn_start slightly in the future so redeemable_after check passes
+    # txn_start slightly in the future so redeemable_after check passes
     txn_start = utcnow() + timedelta(seconds=2)
-    await redeem_coins(user.id, 60, "txn-2", txn_start, db)
-    await db.commit()
+    await redeem_coins(user["id"], 60, "txn-2", txn_start, conn)
 
-    assert await get_balance(user.id, db) == 40
+    assert await get_balance(user["id"], conn) == 40
 
 
-async def test_cannot_redeem_more_than_balance(db):
-    user = await make_user(db, "+919800000013")
-    await award_coins(user.id, 50, "txn-1", db)
-    await db.commit()
+async def test_cannot_redeem_more_than_balance(conn):
+    user = await make_user(conn, "+919800000013")
+    await award_coins(user["id"], 50, "txn-1", conn)
 
     txn_start = utcnow() + timedelta(seconds=2)
     with pytest.raises(InsufficientCoinsError):
-        await redeem_coins(user.id, 100, "txn-2", txn_start, db)
+        await redeem_coins(user["id"], 100, "txn-2", txn_start, conn)
 
 
-async def test_cannot_redeem_coins_earned_in_same_transaction(db):
-    user = await make_user(db, "+919800000014")
+async def test_cannot_redeem_coins_earned_in_same_transaction(conn):
+    user = await make_user(conn, "+919800000014")
     now = utcnow()
-    await award_coins(user.id, 100, "txn-1", db)
-    await db.commit()
+    await award_coins(user["id"], 100, "txn-1", conn)
 
     # txn_start is BEFORE the coins were issued → redeemable_after check blocks it
     txn_start = now - timedelta(seconds=1)
     with pytest.raises(InsufficientCoinsError):
-        await redeem_coins(user.id, 50, "txn-2", txn_start, db)
+        await redeem_coins(user["id"], 50, "txn-2", txn_start, conn)
 
 
-async def test_expired_coins_not_counted_in_balance(db):
-    user = await make_user(db, "+919800000015")
+async def test_expired_coins_not_counted_in_balance(conn):
+    user = await make_user(conn, "+919800000015")
     now = utcnow()
     # Insert an already-expired entry directly
-    expired = CoinsLedger(
-        user_id=user.id,
-        coins=200,
-        type="earned",
-        status="active",
-        reference_id="txn-old",
-        issued_at=now - timedelta(days=400),
-        expiry_at=now - timedelta(days=1),   # already expired
-        redeemable_after=now - timedelta(days=400),
+    await conn.execute(
+        """INSERT INTO coins_ledger
+               (id, user_id, coins, type, status, reference_id, issued_at, expiry_at, redeemable_after)
+           VALUES ($1,$2,200,'earned','active','txn-old',$3,$4,$5)""",
+        new_uuid(), user["id"], now - timedelta(days=400),
+        now - timedelta(days=1),       # already expired
+        now - timedelta(days=400),
     )
-    db.add(expired)
-    await db.commit()
 
-    assert await get_balance(user.id, db) == 0
+    assert await get_balance(user["id"], conn) == 0
 
 
-async def test_expire_coins_job(db, engine):
-    from sqlalchemy.ext.asyncio import async_sessionmaker
-    from unittest.mock import patch
-
-    user = await make_user(db, "+919800000016")
+async def test_expire_coins_job(test_pool):
+    """expire_coins uses its own DB connection; must use committed data, not rolled-back conn."""
+    uid = new_uuid()
+    entry_id = new_uuid()
     now = utcnow()
-    entry = CoinsLedger(
-        user_id=user.id,
-        coins=100,
-        type="earned",
-        status="active",
-        reference_id="txn-1",
-        issued_at=now - timedelta(days=400),
-        expiry_at=now - timedelta(days=1),
-        redeemable_after=now - timedelta(days=400),
-    )
-    db.add(entry)
-    await db.commit()
 
-    # Patch jobs to use the same test engine (tables already exist there)
-    test_session_factory = async_sessionmaker(engine, expire_on_commit=False)
-    with patch("app.jobs.AsyncSessionLocal", test_session_factory):
+    # Commit data directly so expire_coins (separate connection) can see it
+    async with test_pool.acquire() as direct_conn:
+        await direct_conn.execute(
+            "INSERT INTO users (id, mobile_number, role, is_active, created_at) VALUES ($1,$2,'user',true,NOW())",
+            uid, "+919800000016",
+        )
+        await direct_conn.execute(
+            """INSERT INTO coins_ledger
+                   (id, user_id, coins, type, status, reference_id, issued_at, expiry_at, redeemable_after)
+               VALUES ($1,$2,100,'earned','active','txn-1',$3,$4,$5)""",
+            entry_id, uid,
+            now - timedelta(days=400),
+            now - timedelta(days=1),   # past expiry
+            now - timedelta(days=400),
+        )
+
+    with patch("app.database.get_pool", return_value=test_pool):
         from app.jobs import expire_coins
         await expire_coins()
 
-    await db.refresh(entry)
-    assert entry.status == "expired"
+    async with test_pool.acquire() as direct_conn:
+        status = await direct_conn.fetchval(
+            "SELECT status FROM coins_ledger WHERE id = $1", entry_id
+        )
+        assert status == "expired"
+        # Cleanup so this doesn't bleed into other tests
+        await direct_conn.execute("DELETE FROM coins_ledger WHERE id = $1", entry_id)
+        await direct_conn.execute("DELETE FROM users WHERE id = $1", uid)
 
 
 # ── API Endpoints ─────────────────────────────────────────────────────────────
 
-async def test_get_balance_endpoint(client, db, redis):
+async def test_get_balance_endpoint(client, redis):
     headers = await login(client, redis, "+919800000020")
     response = await client.get("/api/v1/users/me/coins/balance", headers=headers)
     assert response.status_code == 200
@@ -140,7 +151,7 @@ async def test_get_balance_endpoint(client, db, redis):
     assert data["expiring_soon"] is None
 
 
-async def test_coin_history_empty(client, db, redis):
+async def test_coin_history_empty(client, redis):
     headers = await login(client, redis, "+919800000021")
     response = await client.get("/api/v1/users/me/coins/history", headers=headers)
     assert response.status_code == 200
@@ -150,7 +161,7 @@ async def test_coin_history_empty(client, db, redis):
     assert data["page"] == 1
 
 
-async def test_coin_history_pagination(client, db, redis):
+async def test_coin_history_pagination(client, conn, redis):
     headers = await login(client, redis, "+919800000022")
 
     # Get user id from profile
@@ -160,18 +171,13 @@ async def test_coin_history_pagination(client, db, redis):
     # Add 5 ledger entries directly
     now = utcnow()
     for i in range(5):
-        entry = CoinsLedger(
-            user_id=user_id,
-            coins=10,
-            type="earned",
-            status="active",
-            reference_id=f"txn-{i}",
-            issued_at=now,
-            expiry_at=now + timedelta(days=365),
-            redeemable_after=now,
+        await conn.execute(
+            """INSERT INTO coins_ledger
+                   (id, user_id, coins, type, status, reference_id, issued_at, expiry_at, redeemable_after)
+               VALUES ($1,$2,10,'earned','active',$3,$4,$5,$6)""",
+            new_uuid(), user_id, f"txn-{i}",
+            now, now + timedelta(days=365), now,
         )
-        db.add(entry)
-    await db.commit()
 
     resp = await client.get("/api/v1/users/me/coins/history?page=1&limit=3", headers=headers)
     assert resp.status_code == 200
@@ -180,7 +186,7 @@ async def test_coin_history_pagination(client, db, redis):
     assert len(data["items"]) == 3
 
 
-async def test_update_profile_name(client, db, redis):
+async def test_update_profile_name(client, redis):
     headers = await login(client, redis, "+919800000023")
     response = await client.patch("/api/v1/users/me", json={"name": "Ravi Kumar"}, headers=headers)
     assert response.status_code == 200
