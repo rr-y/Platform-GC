@@ -1,0 +1,566 @@
+{
+  "info": {
+    "name": "Platform GC — Loyalty & Rewards API",
+    "_postman_id": "platform-gc-v1",
+    "description": "Complete API collection for the Platform GC loyalty platform.\n\n**Setup:**\n1. Import `platform-gc.postman_environment.json` as an environment\n2. Select the `Platform GC - Local` environment\n3. Run **Auth > Request OTP** → **Verify OTP** — tokens are saved automatically\n4. All subsequent requests use the saved `access_token`\n\n**Admin requests:** set `role=admin` in the DB, then re-login to get an admin token.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/health", "host": ["{{base_url}}"], "path": ["health"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Request OTP",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile_number\": \"{{mobile_number}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/otp/request",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "otp", "request"]
+            }
+          }
+        },
+        {
+          "name": "Verify OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.access_token) {",
+                  "  pm.environment.set('access_token', json.access_token);",
+                  "  pm.environment.set('refresh_token', json.refresh_token);",
+                  "  pm.environment.set('user_id', json.user.user_id);",
+                  "  console.log('Tokens saved. User:', json.user.mobile_number);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile_number\": \"{{mobile_number}}\",\n  \"otp\": \"{{otp}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/otp/verify",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "otp", "verify"]
+            }
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.access_token) {",
+                  "  pm.environment.set('access_token', json.access_token);",
+                  "  console.log('Access token refreshed');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/refresh",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "token", "refresh"]
+            }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "logout"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "User",
+      "item": [
+        {
+          "name": "Get My Profile",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/me",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "me"]
+            }
+          }
+        },
+        {
+          "name": "Update My Name",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"John Doe\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/me",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "me"]
+            }
+          }
+        },
+        {
+          "name": "Get Coin Balance",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/me/coins/balance",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "me", "coins", "balance"]
+            }
+          }
+        },
+        {
+          "name": "Get Coin History",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/me/coins/history?page=1&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "me", "coins", "history"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get My Transactions",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/me/transactions?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "me", "transactions"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Transactions",
+      "item": [
+        {
+          "name": "Create Transaction (basic)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.id) pm.environment.set('transaction_id', json.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"order_ref\": \"ORD-{{$randomInt}}\",\n  \"amount\": 500\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/transactions",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "transactions"]
+            }
+          }
+        },
+        {
+          "name": "Create Transaction (redeem coins)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.id) pm.environment.set('transaction_id', json.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"order_ref\": \"ORD-{{$randomInt}}\",\n  \"amount\": 1000,\n  \"coins_to_redeem\": 50\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/transactions",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "transactions"]
+            }
+          }
+        },
+        {
+          "name": "Create Transaction (with coupon)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.id) pm.environment.set('transaction_id', json.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"order_ref\": \"ORD-{{$randomInt}}\",\n  \"amount\": 1000,\n  \"coupon_code\": \"FLAT100\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/transactions",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "transactions"]
+            }
+          }
+        },
+        {
+          "name": "Get Transaction by ID",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/transactions/{{transaction_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "transactions", "{{transaction_id}}"]
+            }
+          }
+        },
+        {
+          "name": "List Transactions",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/transactions?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "transactions"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Coupons",
+      "item": [
+        {
+          "name": "Validate Coupon",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"FLAT100\",\n  \"order_amount\": 500\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/coupons/validate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "coupons", "validate"]
+            }
+          }
+        },
+        {
+          "name": "Get Available Offers",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/coupons/available?order_amount=500",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "coupons", "available"],
+              "query": [{ "key": "order_amount", "value": "500" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin — Campaigns",
+      "item": [
+        {
+          "name": "Create Campaign (flat discount)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.id) pm.environment.set('campaign_id', json.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Flat ₹100 Off\",\n  \"type\": \"flat\",\n  \"discount_value\": 100,\n  \"min_order_value\": 400,\n  \"valid_from\": \"2026-01-01T00:00:00\",\n  \"valid_to\": \"2026-12-31T23:59:59\",\n  \"audience_type\": \"all\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/campaigns",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "campaigns"]
+            }
+          }
+        },
+        {
+          "name": "Create Campaign (percentage discount)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.id) pm.environment.set('campaign_id', json.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"20% Off on Orders above ₹500\",\n  \"type\": \"percentage\",\n  \"discount_value\": 20,\n  \"min_order_value\": 500,\n  \"max_discount_cap\": 200,\n  \"valid_from\": \"2026-01-01T00:00:00\",\n  \"valid_to\": \"2026-12-31T23:59:59\",\n  \"audience_type\": \"all\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/campaigns",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "campaigns"]
+            }
+          }
+        },
+        {
+          "name": "List Campaigns",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/campaigns?active_only=false",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "campaigns"],
+              "query": [{ "key": "active_only", "value": "false" }]
+            }
+          }
+        },
+        {
+          "name": "Get Campaign",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/campaigns/{{campaign_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "campaigns", "{{campaign_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Update Campaign",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_active\": true,\n  \"title\": \"Updated Title\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/campaigns/{{campaign_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "campaigns", "{{campaign_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Add Coupons to Campaign",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codes\": [\"FLAT100\", \"FLAT100B\", \"FLAT100C\"],\n  \"is_auto_apply\": false,\n  \"max_uses\": 100,\n  \"per_user_limit\": 1\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/campaigns/{{campaign_id}}/coupons",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "campaigns", "{{campaign_id}}", "coupons"]
+            }
+          }
+        },
+        {
+          "name": "Send Campaign Notification",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/campaigns/{{campaign_id}}/notify",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "campaigns", "{{campaign_id}}", "notify"]
+            }
+          }
+        },
+        {
+          "name": "Deactivate Campaign",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/campaigns/{{campaign_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "campaigns", "{{campaign_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin — Users",
+      "item": [
+        {
+          "name": "List Users",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/users?page=1&limit=50",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "users"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "50" },
+                { "key": "search", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Search Users by Mobile",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/users?search=%2B91",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "users"],
+              "query": [{ "key": "search", "value": "+91" }]
+            }
+          }
+        },
+        {
+          "name": "Get User by ID",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/users/{{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "users", "{{user_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Adjust User Coins (add)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coins\": 100,\n  \"reason\": \"Goodwill adjustment\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/users/{{user_id}}/coins/adjust",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "users", "{{user_id}}", "coins", "adjust"]
+            }
+          }
+        },
+        {
+          "name": "Adjust User Coins (deduct)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coins\": -50,\n  \"reason\": \"Manual correction\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/users/{{user_id}}/coins/adjust",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "users", "{{user_id}}", "coins", "adjust"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
