@@ -40,6 +40,24 @@ uv run alembic revision --autogenerate -m "description"
 uv run alembic upgrade head
 ```
 
+## Git workflow
+Every new feature must follow this flow — no exceptions:
+1. Create a branch: `git checkout -b feature/<name>` (or `fix/<name>` for bug fixes)
+2. Make changes on the branch
+3. Run tests: `uv run pytest tests/ -v` — all must pass
+4. Commit on the branch
+5. Push and raise a PR to `main` — never commit directly to `main`
+
+```bash
+git checkout -b feature/my-feature
+# ... make changes ...
+uv run pytest tests/ -v
+git add <files>
+git commit -m "feat: description"
+git push -u origin feature/my-feature
+# then open PR on GitHub
+```
+
 ## Key rules
 - All models in `models.py`, all schemas in `schemas.py` — split only if >300 lines
 - Use `utcnow()` helper (naive UTC) for all datetime fields — SQLite/PostgreSQL compatible
