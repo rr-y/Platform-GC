@@ -11,10 +11,14 @@ def _pg_url(url: str) -> str:
 
 async def init_pool() -> None:
     global _pool
+    url = _pg_url(settings.DATABASE_URL)
+    # Railway (and most managed PostgreSQL) requires SSL — pass ssl="require" when not local
+    ssl = "require" if settings.APP_ENV != "development" else None
     _pool = await asyncpg.create_pool(
-        _pg_url(settings.DATABASE_URL),
+        url,
         min_size=2,
         max_size=10,
+        ssl=ssl,
     )
 
 
