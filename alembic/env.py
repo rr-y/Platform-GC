@@ -16,6 +16,8 @@ if config.config_file_name is not None:
 # Override sqlalchemy.url from environment if set (Docker / CI / Railway)
 db_url = os.getenv("DATABASE_URL")
 if db_url:
+    # Railway provides postgresql:// — async engine needs postgresql+asyncpg://
+    db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
     config.set_main_option("sqlalchemy.url", db_url)
 
 # No ORM metadata — migrations are written as raw SQL
