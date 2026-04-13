@@ -4,22 +4,22 @@
 
 dev:
 	@echo "Stopping any running containers..."
-	@docker compose down --remove-orphans 2>/dev/null || true
+	@docker-compose down --remove-orphans 2>/dev/null || true
 	@echo "Starting backend (api + postgres + redis)..."
-	docker compose up --build
+	docker-compose up --build
 
 restart: dev
 
 stop:
-	docker compose down --remove-orphans
+	docker-compose down --remove-orphans
 
 logs:
-	docker compose logs -f api
+	docker-compose logs -f api
 
 # ── Database ──────────────────────────────────────────────────────────────────
 
 migrate:
-	docker compose run --rm api sh -c ".venv/bin/alembic upgrade head"
+	docker-compose run --rm api sh -c ".venv/bin/alembic upgrade head"
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -29,4 +29,4 @@ test:
 # ── Utilities ─────────────────────────────────────────────────────────────────
 
 shell:
-	docker compose exec api sh
+	docker-compose exec api sh
