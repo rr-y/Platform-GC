@@ -41,14 +41,15 @@ uv run alembic upgrade head
 ```
 
 ## Git workflow
-Every new feature must follow this flow — no exceptions:
-1. Create a branch: `git checkout -b feature/<name>` (or `fix/<name>` for bug fixes)
+Every new feature or bug fix must follow this flow — no exceptions:
+1. Create a branch: `git checkout -b feature/<name>` or `git checkout -b fix/<name>` for bugs
 2. Make changes on the branch
 3. Run tests: `uv run pytest tests/ -v` — all must pass
 4. Commit on the branch
-5. Push and raise a PR to `main` — never commit directly to `main`
+5. Push and raise a PR to `main` — **NEVER commit or push directly to `main`**
 
 ```bash
+# New feature
 git checkout -b feature/my-feature
 # ... make changes ...
 uv run pytest tests/ -v
@@ -56,7 +57,25 @@ git add <files>
 git commit -m "feat: description"
 git push -u origin feature/my-feature
 # then open PR on GitHub
+
+# Bug fix
+git checkout -b fix/bug-description
+# ... fix the bug ...
+uv run pytest tests/ -v
+git add <files>
+git commit -m "fix: description"
+git push -u origin fix/bug-description
+# then open PR on GitHub
 ```
+
+## Branch protection rule
+**`main` is a protected branch — no exceptions:**
+- Never run `git checkout main` then make changes
+- Never run `git commit` on `main`
+- Never run `git push` on `main` (or `git push origin main`)
+- Never use `git merge` directly into `main`
+- All changes reach `main` only through a merged PR on GitHub
+- If already on `main` by mistake, stash changes and switch to a branch before committing
 
 ## Key rules
 - All models in `models.py`, all schemas in `schemas.py` — split only if >300 lines
