@@ -6,6 +6,7 @@ from app.database import get_conn
 from app.redis import get_redis
 from app.schemas import (
     AccessTokenOut,
+    AdminBootstrapIn,
     OtpRequestIn,
     OtpRequestOut,
     OtpVerifyIn,
@@ -87,3 +88,45 @@ async def logout_endpoint(
     redis: Redis = Depends(get_redis),
 ):
     await logout(body.refresh_token, redis)
+
+
+@router.post("/admin/bootstrap", response_model=TokenOut, status_code=status.HTTP_201_CREATED)
+async def admin_bootstrap(
+    body: AdminBootstrapIn,
+    conn: asyncpg.Connection = Depends(get_conn),
+    redis: Redis = Depends(get_redis),
+):
+    """
+    Create or promote a user to admin role.
+
+    Requires `secret` matching `ADMIN_SECRET_KEY` in server config.
+    Set ADMIN_SECRET_KEY in your .env — leave it blank to disable this endpoint.
+
+    Use this once to bootstrap your first admin account, then send OTPs normally.
+    """
+    from app.config import settings
+    if not settings.ADMIN_SECRET_KEY or body.secret != settings.ADMIN_SECRET_KEY:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid secret")
+
+    # Get or create the user, then ensure admin role
+    user = await get_or_create_user(body.mobile_number, conn)
+    if user["role"] != "admin":
+        await conn.execute(
+            "UPDATE users SET role = 'admin' WHERE id = $1", user["id"]
+        )
+        user = {**user, "role": "admin"}
+
+    access_token, refresh_token = await issue_tokens(user, redis)
+    balance = await get_balance(user["id"], conn)
+
+    return TokenOut(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        user=UserOut(
+            user_id=user["id"],
+            mobile_number=user["mobile_number"],
+            name=user["name"],
+            role=user["role"],
+            coin_balance=balance,
+        ),
+    )

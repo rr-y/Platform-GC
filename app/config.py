@@ -6,6 +6,9 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
     SECRET_KEY: str = "change-me-in-production"
 
+    # Admin bootstrap — set this in .env to enable POST /auth/admin/bootstrap
+    ADMIN_SECRET_KEY: str = ""
+
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/platform_gc"
 

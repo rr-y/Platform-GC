@@ -3,6 +3,7 @@ from datetime import timedelta
 
 from app.config import settings
 from app.models import new_uuid, utcnow
+from app.templates import messages
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +15,7 @@ def _twilio_client():
 
 async def send_otp(mobile: str, otp: str) -> None:
     """Send OTP via WhatsApp (preferred) with SMS fallback."""
-    message = f"Your OTP is {otp}. Valid for {settings.OTP_EXPIRE_SECONDS // 60} minutes. Do not share."
+    message = messages.otp_message(otp)
 
     if settings.TWILIO_WHATSAPP_FROM:
         try:
@@ -47,10 +48,7 @@ async def _send_sms(mobile: str, message: str) -> None:
 
 
 async def send_expiry_reminder(mobile: str, coins: int, expiry_date: str) -> None:
-    message = (
-        f"Hi! Your {coins} reward coins expire on {expiry_date}. "
-        f"Use them on your next purchase before they expire!"
-    )
+    message = messages.expiry_reminder(coins, expiry_date)
     if settings.TWILIO_WHATSAPP_FROM:
         try:
             await _send_whatsapp(mobile, message)
@@ -68,6 +66,38 @@ async def send_campaign_message(mobile: str, title: str, message_body: str) -> N
         except Exception as e:
             logger.warning("WhatsApp campaign message failed for %s: %s", mobile, e)
     await _send_sms(mobile, message_body)
+
+
+async def send_transaction_notification(
+    mobile: str,
+    name: str | None,
+    final_amount: float,
+    coins_earned: int,
+    coins_redeemed: int,
+    coins_redeemed_value: float,
+    balance: int,
+) -> None:
+    """
+    Send a post-payment summary to the customer after the admin processes a
+    transaction. Covers earned coins, redeemed coins, and new balance in one
+    message using the central template.
+    """
+    message = messages.transaction_summary(
+        name=name,
+        final_amount=final_amount,
+        coins_earned=coins_earned,
+        coins_redeemed=coins_redeemed,
+        coins_redeemed_value=coins_redeemed_value,
+        balance=balance,
+    )
+
+    if settings.TWILIO_WHATSAPP_FROM:
+        try:
+            await _send_whatsapp(mobile, message)
+            return
+        except Exception as e:
+            logger.warning("WhatsApp txn notification failed for %s: %s", mobile, e)
+    await _send_sms(mobile, message)
 
 
 async def dispatch_expiry_notification(user_id: str) -> None:

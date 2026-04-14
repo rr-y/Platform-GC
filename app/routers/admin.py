@@ -5,6 +5,10 @@ from app.database import get_conn
 from app.deps import require_admin
 from app.models import new_uuid, utcnow
 from app.schemas import (
+    AdminCheckoutIn,
+    AdminCheckoutOut,
+    AdminCustomerLookupIn,
+    AdminCustomerLookupOut,
     CampaignIn,
     CampaignOut,
     CoinAdjustIn,
@@ -12,6 +16,7 @@ from app.schemas import (
     UserAdminOut,
 )
 from app.services.coins import award_coins, get_balance
+from app.templates import messages
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -120,7 +125,9 @@ async def blast_campaign_notification(
     sent = 0
     for user in users:
         try:
-            msg = f"🎉 {campaign['title']} — Don't miss out! Valid till {campaign['valid_to'].strftime('%d %b %Y')}."
+            msg = messages.campaign_blast(
+                campaign["title"], campaign["valid_to"].strftime("%d %b %Y")
+            )
             await send_campaign_message(user["mobile_number"], campaign["title"], msg)
             sent += 1
         except Exception:
@@ -241,6 +248,107 @@ async def adjust_coins(
     )
     balance = await get_balance(user_id, conn)
     return {"user_id": user_id, "adjustment": body.coins, "balance_after": balance}
+
+
+# ── Checkout ──────────────────────────────────────────────────────────────────
+
+@router.post("/customers/lookup", response_model=AdminCustomerLookupOut)
+async def customer_lookup(
+    body: AdminCustomerLookupIn,
+    _: dict = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+):
+    """
+    Step 1 of admin checkout.
+
+    Enter the customer's mobile number and the bill amount.
+    Returns their coin balance, any coins expiring soon, and applicable offers
+    so the admin can decide what to apply before confirming payment.
+    """
+    from math import floor
+    from app.config import settings
+    from app.services.campaigns import get_available_coupons
+    from app.services.coins import get_expiring_soon
+
+    user = await conn.fetchrow(
+        "SELECT id, mobile_number, name FROM users WHERE mobile_number = $1",
+        body.mobile_number,
+    )
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+
+    balance = await get_balance(user["id"], conn)
+    expiring = await get_expiring_soon(user["id"], conn)
+    offers = await get_available_coupons(user["id"], body.amount, conn)
+
+    max_redeemable = floor(body.amount * settings.MAX_COINS_REDEEM_PERCENT / settings.COIN_RUPEE_VALUE)
+    max_redeemable = min(max_redeemable, balance)
+
+    from app.schemas import AvailableOffer, ExpiringSoon
+    return AdminCustomerLookupOut(
+        user_id=user["id"],
+        name=user["name"],
+        mobile_number=user["mobile_number"],
+        coin_balance=balance,
+        expiring_soon=ExpiringSoon(
+            coins=expiring["coins"], expiry_at=expiring["expiry_at"]
+        ) if expiring else None,
+        applicable_offers=[AvailableOffer(**o) for o in offers],
+        max_redeemable_coins=max_redeemable,
+        max_redeemable_value=round(max_redeemable * settings.COIN_RUPEE_VALUE, 2),
+    )
+
+
+@router.post("/checkout", response_model=AdminCheckoutOut, status_code=status.HTTP_201_CREATED)
+async def admin_checkout(
+    body: AdminCheckoutIn,
+    _: dict = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+):
+    """
+    Step 2 of admin checkout.
+
+    Confirm the payment. Optionally pass coins_to_redeem and/or coupon_code
+    from the lookup step. Creates the transaction, awards/redeems coins, and
+    sends the customer a WhatsApp/SMS summary.
+    """
+    import logging
+    from app.services.transactions import create_transaction
+    from app.services.notifications import send_transaction_notification
+
+    logger = logging.getLogger(__name__)
+
+    user = await conn.fetchrow(
+        "SELECT id, mobile_number, name FROM users WHERE mobile_number = $1",
+        body.mobile_number,
+    )
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+
+    txn = await create_transaction(
+        user_id=user["id"],
+        amount=body.amount,
+        conn=conn,
+        coins_to_redeem=body.coins_to_redeem,
+        coupon_code=body.coupon_code,
+    )
+
+    notification_sent = False
+    try:
+        await send_transaction_notification(
+            mobile=user["mobile_number"],
+            name=user["name"],
+            final_amount=txn["final_amount"],
+            coins_earned=txn["coins_earned"],
+            coins_redeemed=txn["coins_redeemed"],
+            coins_redeemed_value=txn["coins_redeemed_value"],
+            balance=txn["coins_balance_after"],
+        )
+        notification_sent = True
+    except Exception as e:
+        logger.warning("Transaction notification failed for %s: %s", user["mobile_number"], e)
+
+    return AdminCheckoutOut(**txn, notification_sent=notification_sent)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

@@ -218,3 +218,80 @@ class UserAdminOut(BaseModel):
     created_at: str
 
     model_config = {"from_attributes": True}
+
+
+# ── Admin — Bootstrap ─────────────────────────────────────────────────────────
+
+class AdminBootstrapIn(BaseModel):
+    mobile_number: str
+    secret: str  # must match ADMIN_SECRET_KEY in .env
+
+    @field_validator("mobile_number")
+    @classmethod
+    def normalize_mobile(cls, v: str) -> str:
+        try:
+            parsed = phonenumbers.parse(v, "IN")
+            if not phonenumbers.is_valid_number(parsed):
+                raise ValueError("Invalid mobile number")
+            return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+        except phonenumbers.NumberParseException:
+            raise ValueError("Invalid mobile number format")
+
+
+# ── Admin — Checkout ──────────────────────────────────────────────────────────
+
+class AdminCustomerLookupIn(BaseModel):
+    mobile_number: str
+    amount: float
+
+    @field_validator("mobile_number")
+    @classmethod
+    def normalize_mobile(cls, v: str) -> str:
+        try:
+            parsed = phonenumbers.parse(v, "IN")
+            if not phonenumbers.is_valid_number(parsed):
+                raise ValueError("Invalid mobile number")
+            return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+        except phonenumbers.NumberParseException:
+            raise ValueError("Invalid mobile number format")
+
+
+class AdminCustomerLookupOut(BaseModel):
+    user_id: str
+    name: str | None
+    mobile_number: str
+    coin_balance: int
+    expiring_soon: ExpiringSoon | None
+    applicable_offers: list[AvailableOffer]
+    max_redeemable_coins: int
+    max_redeemable_value: float
+
+
+class AdminCheckoutIn(BaseModel):
+    mobile_number: str
+    amount: float
+    coins_to_redeem: int = 0
+    coupon_code: str | None = None
+
+    @field_validator("mobile_number")
+    @classmethod
+    def normalize_mobile(cls, v: str) -> str:
+        try:
+            parsed = phonenumbers.parse(v, "IN")
+            if not phonenumbers.is_valid_number(parsed):
+                raise ValueError("Invalid mobile number")
+            return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+        except phonenumbers.NumberParseException:
+            raise ValueError("Invalid mobile number format")
+
+
+class AdminCheckoutOut(BaseModel):
+    transaction_id: str
+    amount: float
+    discount_applied: float
+    coins_redeemed: int
+    coins_redeemed_value: float
+    final_amount: float
+    coins_earned: int
+    coins_balance_after: int
+    notification_sent: bool
