@@ -161,6 +161,22 @@ class AvailableOffer(BaseModel):
     discount_type: str
     discount_value: float
     is_auto_apply: bool
+    image_url: str | None = None
+    description: str | None = None
+    valid_to: str | None = None
+
+
+class OfferBannerItem(BaseModel):
+    campaign_id: str
+    title: str
+    description: str | None
+    image_url: str | None
+    discount_type: str
+    discount_value: float
+    min_order_value: float
+    valid_to: str
+    coupon_code: str | None
+    is_auto_apply: bool
 
 
 # ── Admin — Campaigns ─────────────────────────────────────────────────────────
@@ -175,6 +191,8 @@ class CampaignIn(BaseModel):
     valid_to: datetime
     audience_type: str = "all"
     usage_limit: int | None = None
+    image_url: str | None = None
+    description: str | None = None
 
 
 class CampaignOut(BaseModel):
@@ -190,8 +208,14 @@ class CampaignOut(BaseModel):
     audience_type: str
     usage_limit: int | None
     usage_count: int
+    image_url: str | None = None
+    description: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class CampaignUserEligibilityIn(BaseModel):
+    user_ids: list[str]
 
 
 class CouponAddIn(BaseModel):

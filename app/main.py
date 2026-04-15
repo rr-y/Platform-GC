@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import close_pool, init_pool
 from app.jobs import expire_coins, send_expiry_notifications
-from app.routers import admin, auth, coins, coupons, transactions
+from app.routers import admin, auth, coins, coupons, offers, transactions
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -42,6 +42,7 @@ app.include_router(auth.router, prefix="/api/v1")
 app.include_router(coins.router, prefix="/api/v1")
 app.include_router(transactions.router, prefix="/api/v1")
 app.include_router(coupons.router, prefix="/api/v1")
+app.include_router(offers.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 
 

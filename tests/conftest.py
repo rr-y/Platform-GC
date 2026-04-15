@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS campaigns (
     audience_type    VARCHAR(20) NOT NULL DEFAULT 'all',
     usage_limit      INTEGER,
     usage_count      INTEGER NOT NULL DEFAULT 0,
+    image_url        TEXT,
+    description      TEXT,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -102,6 +104,15 @@ CREATE TABLE IF NOT EXISTS notification_logs (
     sent_at      TIMESTAMPTZ,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS campaign_user_eligibility (
+    id          VARCHAR(36) PRIMARY KEY,
+    campaign_id VARCHAR(36) NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    user_id     VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (campaign_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_campaign_user_elig ON campaign_user_eligibility(user_id, campaign_id);
 """
 
 
@@ -125,7 +136,7 @@ async def test_pool():
         await conn.execute(
             """DROP TABLE IF EXISTS
                notification_logs, coupon_redemptions, transactions,
-               coins_ledger, coupons, campaigns, users CASCADE"""
+               coins_ledger, campaign_user_eligibility, coupons, campaigns, users CASCADE"""
         )
         await conn.execute(_SCHEMA_SQL)
 
