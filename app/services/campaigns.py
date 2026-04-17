@@ -153,10 +153,10 @@ async def get_offer_banners(
                   ca.audience_type,
                   (SELECT c.code FROM coupons c
                    WHERE c.campaign_id = ca.id
-                   ORDER BY c.created_at ASC LIMIT 1) AS coupon_code,
+                   ORDER BY c.id ASC LIMIT 1) AS coupon_code,
                   (SELECT c.is_auto_apply FROM coupons c
                    WHERE c.campaign_id = ca.id
-                   ORDER BY c.created_at ASC LIMIT 1) AS is_auto_apply
+                   ORDER BY c.id ASC LIMIT 1) AS is_auto_apply
            FROM campaigns ca
            WHERE ca.is_active = true
              AND ca.valid_from <= $1
