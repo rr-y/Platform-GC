@@ -1,14 +1,18 @@
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from redis.asyncio import Redis
 
 from app.database import get_conn
 from app.deps import require_admin
 from app.models import new_uuid, utcnow
+from app.redis import get_redis
 from app.schemas import (
     AdminCheckoutIn,
     AdminCheckoutOut,
     AdminCustomerLookupIn,
     AdminCustomerLookupOut,
+    AdminInviteIn,
+    AdminInviteOut,
     CampaignIn,
     CampaignOut,
     CoinAdjustIn,
@@ -251,6 +255,35 @@ async def adjust_coins(
 
 
 # ── Checkout ──────────────────────────────────────────────────────────────────
+
+@router.post("/customers/invite", response_model=AdminInviteOut)
+async def customer_invite(
+    body: AdminInviteIn,
+    _: dict = Depends(require_admin),
+    redis: Redis = Depends(get_redis),
+):
+    """
+    Admin-initiated onboarding for walk-in customers.
+
+    Sends an OTP to the customer's phone. The admin then asks the customer
+    for the code and calls `/auth/otp/verify` to create the user and log them
+    in. Useful when enrolling a new customer at the shop counter before they
+    have downloaded the app.
+    """
+    from app.config import settings
+    from app.services.auth import RateLimitError, request_otp
+
+    try:
+        await request_otp(body.mobile_number, redis)
+    except RateLimitError as e:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(e))
+
+    return AdminInviteOut(
+        message="OTP sent to customer",
+        mobile_number=body.mobile_number,
+        expires_in_seconds=settings.OTP_EXPIRE_SECONDS,
+    )
+
 
 @router.post("/customers/lookup", response_model=AdminCustomerLookupOut)
 async def customer_lookup(
