@@ -561,6 +561,28 @@
           }
         }
       ]
+    },
+    {
+      "name": "Admin — Customers",
+      "item": [
+        {
+          "name": "Invite New Customer (send OTP)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile_number\": \"{{customer_mobile}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/customers/invite",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "customers", "invite"]
+            },
+            "description": "Admin-initiated onboarding for walk-in customers. Sends an OTP to the customer's phone via Twilio. Next step: call **Auth > Verify OTP** with the code the customer reads back — that creates the user record."
+          }
+        }
+      ]
     }
   ]
 }
