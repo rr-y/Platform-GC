@@ -11,6 +11,7 @@ from app.schemas import (
     AdminCustomerLookupOut,
     CampaignIn,
     CampaignOut,
+    CampaignUserEligibilityIn,
     CoinAdjustIn,
     CouponAddIn,
     UserAdminOut,
@@ -33,12 +34,14 @@ async def create_campaign(
     await conn.execute(
         """INSERT INTO campaigns
                (id, title, type, discount_value, min_order_value, max_discount_cap,
-                valid_from, valid_to, is_active, audience_type, usage_limit, usage_count, created_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,$9,$10,0,$11)""",
+                valid_from, valid_to, is_active, audience_type, usage_limit, usage_count,
+                image_url, description, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,$9,$10,0,$11,$12,$13)""",
         cid, body.title, body.type, body.discount_value,
         body.min_order_value or 0, body.max_discount_cap,
         body.valid_from, body.valid_to,
-        body.audience_type, body.usage_limit, utcnow(),
+        body.audience_type, body.usage_limit,
+        body.image_url, body.description, utcnow(),
     )
     row = await conn.fetchrow("SELECT * FROM campaigns WHERE id = $1", cid)
     return _campaign_out(row)
@@ -82,7 +85,8 @@ async def update_campaign(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found")
 
     allowed = {"title", "discount_value", "min_order_value", "max_discount_cap",
-               "valid_from", "valid_to", "is_active", "audience_type", "usage_limit"}
+               "valid_from", "valid_to", "is_active", "audience_type", "usage_limit",
+               "image_url", "description"}
     updates = {k: v for k, v in body.items() if k in allowed}
     if not updates:
         row = await conn.fetchrow("SELECT * FROM campaigns WHERE id = $1", campaign_id)
@@ -351,6 +355,55 @@ async def admin_checkout(
     return AdminCheckoutOut(**txn, notification_sent=notification_sent)
 
 
+# ── Campaign User Eligibility ─────────────────────────────────────────────────
+
+@router.post("/campaigns/{campaign_id}/users", status_code=status.HTTP_201_CREATED)
+async def add_campaign_users(
+    campaign_id: str,
+    body: CampaignUserEligibilityIn,
+    _: dict = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+):
+    """Grant specific users access to a specific_users campaign."""
+    campaign = await conn.fetchrow("SELECT id FROM campaigns WHERE id = $1", campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found")
+
+    added = 0
+    for user_id in body.user_ids:
+        exists = await conn.fetchval("SELECT 1 FROM users WHERE id = $1", user_id)
+        if not exists:
+            continue
+        try:
+            await conn.execute(
+                """INSERT INTO campaign_user_eligibility (id, campaign_id, user_id)
+                   VALUES ($1, $2, $3) ON CONFLICT DO NOTHING""",
+                new_uuid(), campaign_id, user_id,
+            )
+            added += 1
+        except Exception:
+            pass
+
+    return {"added": added}
+
+
+@router.delete(
+    "/campaigns/{campaign_id}/users/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def remove_campaign_user(
+    campaign_id: str,
+    user_id: str,
+    _: dict = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+):
+    """Revoke a user's access to a specific_users campaign."""
+    await conn.execute(
+        "DELETE FROM campaign_user_eligibility WHERE campaign_id = $1 AND user_id = $2",
+        campaign_id, user_id,
+    )
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _campaign_out(row) -> CampaignOut:
@@ -367,4 +420,6 @@ def _campaign_out(row) -> CampaignOut:
         audience_type=row["audience_type"],
         usage_limit=row["usage_limit"],
         usage_count=row["usage_count"],
+        image_url=row["image_url"],
+        description=row["description"],
     )

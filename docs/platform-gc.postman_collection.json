@@ -2,7 +2,7 @@
   "info": {
     "name": "Platform GC — Loyalty & Rewards API",
     "_postman_id": "platform-gc-v1",
-    "description": "Complete API collection for the Platform GC loyalty platform.\n\n**Setup:**\n1. Import `platform-gc.postman_environment.json` as an environment\n2. Select the `Platform GC - Local` environment\n3. Run **Auth > Request OTP** → **Verify OTP** — tokens are saved automatically\n4. All subsequent requests use the saved `access_token`\n\n**Admin requests:** set `role=admin` in the DB, then re-login to get an admin token.",
+    "description": "Complete API collection for the Platform GC loyalty platform.\n\n**Setup:**\n1. Import `platform-gc.postman_environment.json` as an environment\n2. Select the `Platform GC - Local` environment\n3. Run **Auth > Request OTP** → **Verify OTP** — tokens are saved automatically\n4. All subsequent requests use the saved `access_token`\n\n**Admin requests:** use Bootstrap Admin to create the first admin user.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [],
@@ -27,6 +27,40 @@
     {
       "name": "Auth",
       "item": [
+        {
+          "name": "Bootstrap Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.access_token) {",
+                  "  pm.environment.set('access_token', json.access_token);",
+                  "  pm.environment.set('refresh_token', json.refresh_token);",
+                  "  pm.environment.set('user_id', json.user.user_id);",
+                  "  console.log('Admin tokens saved. User:', json.user.mobile_number);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile_number\": \"{{mobile_number}}\",\n  \"secret\": \"{{admin_secret}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/admin/bootstrap",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "admin", "bootstrap"]
+            }
+          }
+        },
         {
           "name": "Request OTP",
           "request": {
@@ -197,6 +231,17 @@
               ]
             }
           }
+        },
+        {
+          "name": "Get Offer Banners",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/me/offers",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "me", "offers"]
+            }
+          }
         }
       ]
     },
@@ -211,7 +256,7 @@
               "script": {
                 "exec": [
                   "var json = pm.response.json();",
-                  "if (json.id) pm.environment.set('transaction_id', json.id);"
+                  "if (json.transaction_id) pm.environment.set('transaction_id', json.transaction_id);"
                 ],
                 "type": "text/javascript"
               }
@@ -239,7 +284,7 @@
               "script": {
                 "exec": [
                   "var json = pm.response.json();",
-                  "if (json.id) pm.environment.set('transaction_id', json.id);"
+                  "if (json.transaction_id) pm.environment.set('transaction_id', json.transaction_id);"
                 ],
                 "type": "text/javascript"
               }
@@ -267,7 +312,7 @@
               "script": {
                 "exec": [
                   "var json = pm.response.json();",
-                  "if (json.id) pm.environment.set('transaction_id', json.id);"
+                  "if (json.transaction_id) pm.environment.set('transaction_id', json.transaction_id);"
                 ],
                 "type": "text/javascript"
               }
@@ -278,7 +323,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"order_ref\": \"ORD-{{$randomInt}}\",\n  \"amount\": 1000,\n  \"coupon_code\": \"FLAT100\"\n}"
+              "raw": "{\n  \"order_ref\": \"ORD-{{$randomInt}}\",\n  \"amount\": 1000,\n  \"coupon_code\": \"COKE90\"\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/transactions",
@@ -325,7 +370,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"code\": \"FLAT100\",\n  \"order_amount\": 500\n}"
+              "raw": "{\n  \"code\": \"COKE90\",\n  \"order_amount\": 99\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/coupons/validate",
@@ -335,7 +380,7 @@
           }
         },
         {
-          "name": "Get Available Offers",
+          "name": "Get Available Offers (auto-apply only)",
           "request": {
             "method": "GET",
             "url": {
@@ -352,14 +397,15 @@
       "name": "Admin — Campaigns",
       "item": [
         {
-          "name": "Create Campaign (flat discount)",
+          "name": "Create Campaign — 7% off over ₹200",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
                   "var json = pm.response.json();",
-                  "if (json.id) pm.environment.set('campaign_id', json.id);"
+                  "if (json.id) pm.environment.set('campaign_id', json.id);",
+                  "console.log('Campaign ID:', json.id);"
                 ],
                 "type": "text/javascript"
               }
@@ -370,7 +416,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Flat ₹100 Off\",\n  \"type\": \"flat\",\n  \"discount_value\": 100,\n  \"min_order_value\": 400,\n  \"valid_from\": \"2026-01-01T00:00:00\",\n  \"valid_to\": \"2026-12-31T23:59:59\",\n  \"audience_type\": \"all\"\n}"
+              "raw": "{\n  \"title\": \"7% Off on Orders Above ₹200\",\n  \"type\": \"percentage\",\n  \"discount_value\": 7,\n  \"min_order_value\": 200,\n  \"valid_from\": \"2026-01-01T00:00:00\",\n  \"valid_to\": \"2026-12-31T23:59:59\",\n  \"audience_type\": \"all\",\n  \"description\": \"Get 7% off when you spend ₹200 or more\"\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/admin/campaigns",
@@ -380,14 +426,15 @@
           }
         },
         {
-          "name": "Create Campaign (percentage discount)",
+          "name": "Create Campaign — 5% off over ₹100",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
                   "var json = pm.response.json();",
-                  "if (json.id) pm.environment.set('campaign_id', json.id);"
+                  "if (json.id) pm.environment.set('campaign_id', json.id);",
+                  "console.log('Campaign ID:', json.id);"
                 ],
                 "type": "text/javascript"
               }
@@ -398,12 +445,73 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"20% Off on Orders above ₹500\",\n  \"type\": \"percentage\",\n  \"discount_value\": 20,\n  \"min_order_value\": 500,\n  \"max_discount_cap\": 200,\n  \"valid_from\": \"2026-01-01T00:00:00\",\n  \"valid_to\": \"2026-12-31T23:59:59\",\n  \"audience_type\": \"all\"\n}"
+              "raw": "{\n  \"title\": \"5% Off on Orders Above ₹100\",\n  \"type\": \"percentage\",\n  \"discount_value\": 5,\n  \"min_order_value\": 100,\n  \"valid_from\": \"2026-01-01T00:00:00\",\n  \"valid_to\": \"2026-12-31T23:59:59\",\n  \"audience_type\": \"all\",\n  \"description\": \"Get 5% off on any order above ₹100\"\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/admin/campaigns",
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "admin", "campaigns"]
+            }
+          }
+        },
+        {
+          "name": "Create Campaign — Coke ₹90 (COKE90)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.id) pm.environment.set('campaign_id', json.id);",
+                  "console.log('Campaign ID:', json.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Coke at Just ₹90\",\n  \"type\": \"flat\",\n  \"discount_value\": 9,\n  \"min_order_value\": 99,\n  \"valid_from\": \"2026-01-01T00:00:00\",\n  \"valid_to\": \"2026-12-31T23:59:59\",\n  \"audience_type\": \"all\",\n  \"description\": \"Use code COKE90 — pay only ₹90 instead of ₹99\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/campaigns",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "campaigns"]
+            }
+          }
+        },
+        {
+          "name": "Add Coupon Code to Campaign",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codes\": [\"COKE90\"],\n  \"is_auto_apply\": false,\n  \"max_uses\": 500,\n  \"per_user_limit\": 3\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/campaigns/{{campaign_id}}/coupons",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "campaigns", "{{campaign_id}}", "coupons"]
+            }
+          }
+        },
+        {
+          "name": "Add Auto-Apply Coupon to Campaign",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codes\": [\"AUTO\"],\n  \"is_auto_apply\": true,\n  \"per_user_limit\": 999\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/campaigns/{{campaign_id}}/coupons",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "campaigns", "{{campaign_id}}", "coupons"]
             }
           }
         },
@@ -431,13 +539,13 @@
           }
         },
         {
-          "name": "Update Campaign",
+          "name": "Update Campaign (toggle active / add image)",
           "request": {
             "method": "PATCH",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"is_active\": true,\n  \"title\": \"Updated Title\"\n}"
+              "raw": "{\n  \"is_active\": true,\n  \"image_url\": \"https://res.cloudinary.com/dzzicwvks/image/upload/v1/offers/example.jpg\",\n  \"description\": \"Updated description\"\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/admin/campaigns/{{campaign_id}}",
@@ -447,18 +555,29 @@
           }
         },
         {
-          "name": "Add Coupons to Campaign",
+          "name": "Add Specific Users to Campaign",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"codes\": [\"FLAT100\", \"FLAT100B\", \"FLAT100C\"],\n  \"is_auto_apply\": false,\n  \"max_uses\": 100,\n  \"per_user_limit\": 1\n}"
+              "raw": "{\n  \"user_ids\": [\"{{user_id}}\"]\n}"
             },
             "url": {
-              "raw": "{{base_url}}/api/v1/admin/campaigns/{{campaign_id}}/coupons",
+              "raw": "{{base_url}}/api/v1/admin/campaigns/{{campaign_id}}/users",
               "host": ["{{base_url}}"],
-              "path": ["api", "v1", "admin", "campaigns", "{{campaign_id}}", "coupons"]
+              "path": ["api", "v1", "admin", "campaigns", "{{campaign_id}}", "users"]
+            }
+          }
+        },
+        {
+          "name": "Remove User from Campaign",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/campaigns/{{campaign_id}}/users/{{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "campaigns", "{{campaign_id}}", "users", "{{user_id}}"]
             }
           }
         },
@@ -481,6 +600,130 @@
               "raw": "{{base_url}}/api/v1/admin/campaigns/{{campaign_id}}",
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "admin", "campaigns", "{{campaign_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin — Checkout",
+      "item": [
+        {
+          "name": "Customer Lookup (Step 1)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.user_id) pm.environment.set('customer_user_id', json.user_id);",
+                  "console.log('Customer:', json.name, '| Coins:', json.coin_balance);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile_number\": \"{{mobile_number}}\",\n  \"amount\": 500\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/customers/lookup",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "customers", "lookup"]
+            }
+          }
+        },
+        {
+          "name": "Checkout — Basic (Step 2)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.transaction_id) pm.environment.set('transaction_id', json.transaction_id);",
+                  "console.log('Final amount: ₹' + json.final_amount, '| Coins earned:', json.coins_earned);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile_number\": \"{{mobile_number}}\",\n  \"amount\": 500\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/checkout",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "checkout"]
+            }
+          }
+        },
+        {
+          "name": "Checkout — With Coupon",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.transaction_id) pm.environment.set('transaction_id', json.transaction_id);",
+                  "console.log('Final amount: ₹' + json.final_amount, '| Discount: ₹' + json.discount_applied);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile_number\": \"{{mobile_number}}\",\n  \"amount\": 99,\n  \"coupon_code\": \"COKE90\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/checkout",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "checkout"]
+            }
+          }
+        },
+        {
+          "name": "Checkout — With Coins",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile_number\": \"{{mobile_number}}\",\n  \"amount\": 500,\n  \"coins_to_redeem\": 50\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/checkout",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "checkout"]
+            }
+          }
+        },
+        {
+          "name": "Checkout — Coins + Coupon",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile_number\": \"{{mobile_number}}\",\n  \"amount\": 500,\n  \"coins_to_redeem\": 20,\n  \"coupon_code\": \"COKE90\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/checkout",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "checkout"]
             }
           }
         }
@@ -535,7 +778,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"coins\": 100,\n  \"reason\": \"Goodwill adjustment\"\n}"
+              "raw": "{\n  \"coins\": 100,\n  \"notes\": \"Goodwill adjustment\"\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/admin/users/{{user_id}}/coins/adjust",
@@ -551,7 +794,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"coins\": -50,\n  \"reason\": \"Manual correction\"\n}"
+              "raw": "{\n  \"coins\": -50,\n  \"notes\": \"Manual correction\"\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/admin/users/{{user_id}}/coins/adjust",
