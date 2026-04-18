@@ -1,5 +1,5 @@
 import asyncpg
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
 
 from app.database import get_conn
 from app.deps import get_current_user
@@ -9,6 +9,7 @@ from app.schemas import (
     ExpiringSoon,
     PaginatedCoins,
     PaginatedTransactions,
+    PushTokenIn,
     TransactionItem,
 )
 from app.services.coins import get_balance, get_expiring_soon
@@ -92,6 +93,19 @@ async def update_profile(
         "SELECT id, mobile_number, name FROM users WHERE id = $1", current_user["id"]
     )
     return {"user_id": row["id"], "mobile_number": row["mobile_number"], "name": row["name"]}
+
+
+@router.post("/users/me/push-token", status_code=status.HTTP_204_NO_CONTENT)
+async def register_push_token(
+    body: PushTokenIn,
+    current_user: dict = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_conn),
+):
+    """Upsert the caller's Expo push token so future notifications can target this device."""
+    await conn.execute(
+        "UPDATE users SET push_token = $1 WHERE id = $2",
+        body.push_token, current_user["id"],
+    )
 
 
 @router.get("/users/me/transactions", response_model=PaginatedTransactions)

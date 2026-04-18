@@ -68,6 +68,12 @@ class AccessTokenOut(BaseModel):
     token_type: str = "bearer"
 
 
+# ── Push notifications ────────────────────────────────────────────────────────
+
+class PushTokenIn(BaseModel):
+    push_token: str
+
+
 # ── Coins ─────────────────────────────────────────────────────────────────────
 
 class ExpiringSoon(BaseModel):
