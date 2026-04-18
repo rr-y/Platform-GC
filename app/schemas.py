@@ -319,3 +319,26 @@ class AdminCheckoutOut(BaseModel):
     coins_earned: int
     coins_balance_after: int
     notification_sent: bool
+
+
+# ── Admin — Invite ────────────────────────────────────────────────────────────
+
+class AdminInviteIn(BaseModel):
+    mobile_number: str
+
+    @field_validator("mobile_number")
+    @classmethod
+    def normalize_mobile(cls, v: str) -> str:
+        try:
+            parsed = phonenumbers.parse(v, "IN")
+            if not phonenumbers.is_valid_number(parsed):
+                raise ValueError("Invalid mobile number")
+            return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+        except phonenumbers.NumberParseException:
+            raise ValueError("Invalid mobile number format")
+
+
+class AdminInviteOut(BaseModel):
+    message: str
+    mobile_number: str
+    expires_in_seconds: int
