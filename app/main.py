@@ -6,11 +6,12 @@ from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.config import settings
 from app.database import close_pool, init_pool
 from app.jobs import expire_coins, send_expiry_notifications
 from app.routers import admin, auth, coins, coupons, offers, transactions
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO))
 logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler(timezone="Asia/Kolkata")
@@ -29,11 +30,16 @@ async def lifespan(app: FastAPI):
     logger.info("Shutdown complete")
 
 
-app = FastAPI(title="Platform GC", version="0.1.0", lifespan=lifespan)
+app = FastAPI(
+    title="Platform GC",
+    version="0.1.0",
+    lifespan=lifespan,
+    debug=not settings.is_production,
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins_list,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -5,6 +5,10 @@ class Settings(BaseSettings):
     # App
     APP_ENV: str = "development"
     SECRET_KEY: str = "change-me-in-production"
+    LOG_LEVEL: str = "INFO"
+    # Comma-separated list of allowed origins. "*" allows all (fine for dev; set an
+    # explicit allowlist in production via the CORS_ORIGINS env var).
+    CORS_ORIGINS: str = "*"
 
     # Admin bootstrap — set this in .env to enable POST /auth/admin/bootstrap
     ADMIN_SECRET_KEY: str = ""
@@ -39,6 +43,14 @@ class Settings(BaseSettings):
     TWILIO_WHATSAPP_FROM: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @property
+    def is_production(self) -> bool:
+        return self.APP_ENV == "production"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
 
 settings = Settings()
