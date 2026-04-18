@@ -341,19 +341,28 @@ async def admin_checkout(
     body: AdminCheckoutIn,
     _: dict = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
+    redis: Redis = Depends(get_redis),
 ):
     """
     Step 2 of admin checkout.
 
-    Confirm the payment. Optionally pass coins_to_redeem and/or coupon_code
-    from the lookup step. Creates the transaction, awards/redeems coins, and
-    sends the customer an SMS summary.
+    Requires a customer OTP (previously sent via `/admin/customers/invite`).
+    After verifying the OTP, creates the transaction, awards/redeems coins,
+    and sends the customer an SMS summary.
     """
     import logging
+    from app.services.auth import verify_otp
     from app.services.transactions import create_transaction
     from app.services.notifications import send_transaction_notification
 
     logger = logging.getLogger(__name__)
+
+    valid = await verify_otp(body.mobile_number, body.otp, redis)
+    if not valid:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired OTP",
+        )
 
     user = await conn.fetchrow(
         "SELECT id, mobile_number, name FROM users WHERE mobile_number = $1",

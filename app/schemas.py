@@ -294,6 +294,7 @@ class AdminCustomerLookupOut(BaseModel):
 class AdminCheckoutIn(BaseModel):
     mobile_number: str
     amount: float
+    otp: str
     coins_to_redeem: int = 0
     coupon_code: str | None = None
 
