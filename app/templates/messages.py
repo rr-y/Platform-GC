@@ -1,7 +1,7 @@
 """
 Central repository for all user-facing notification message templates.
 
-Every WhatsApp / SMS message sent to customers must be defined here.
+Every SMS message sent to customers must be defined here.
 To change any customer-facing copy, edit this file — nowhere else.
 """
 
