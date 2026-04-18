@@ -90,11 +90,21 @@ git push -u origin fix/bug-description
 - `redeemable_after` column prevents same-order coin redemption
 
 ## Environment variables
-See `.env.example`. Key tunable values:
+See `.env.example` for the full list. Local dev reads `.env`; production reads from the Railway dashboard (never commit `.env`).
+
+**Environment-aware settings** (`app/config.py`):
+- `APP_ENV` — `development` (default) or `production`. Accessed via `settings.is_production` — do NOT hardcode the string elsewhere.
+- `CORS_ORIGINS` — comma-separated allowlist; `"*"` in dev, explicit domains in prod.
+- `LOG_LEVEL` — `DEBUG` in dev, `INFO` in prod.
+
+**Tunable business values:**
 - `COINS_EARN_RATE` — coins per ₹100 spent (default: 5.0)
 - `COIN_RUPEE_VALUE` — 1 coin = ₹X (default: 0.10)
 - `MAX_COINS_REDEEM_PERCENT` — max % of order payable via coins (default: 20%)
 - `COINS_EXPIRY_DAYS` — coin validity in days (default: 365)
+
+**Production (Railway dashboard) — required keys:**
+`APP_ENV=production`, `SECRET_KEY` (32-byte random), `LOG_LEVEL=INFO`, `CORS_ORIGINS=<your frontend domains>`, `DATABASE_URL`, `REDIS_URL`, all four `TWILIO_*`. Leave `ADMIN_SECRET_KEY` unset once the first admin is bootstrapped.
 
 ## API prefix
 All routes: `/api/v1/...`
