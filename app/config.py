@@ -36,11 +36,10 @@ class Settings(BaseSettings):
     COINS_EXPIRY_DAYS: int = 365
     EXPIRY_NOTIFY_DAYS: int = 7
 
-    # Twilio
+    # Twilio (SMS)
     TWILIO_ACCOUNT_SID: str = ""
     TWILIO_AUTH_TOKEN: str = ""
     TWILIO_FROM_NUMBER: str = ""
-    TWILIO_WHATSAPP_FROM: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

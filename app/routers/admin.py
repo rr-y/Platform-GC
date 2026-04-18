@@ -347,7 +347,7 @@ async def admin_checkout(
 
     Confirm the payment. Optionally pass coins_to_redeem and/or coupon_code
     from the lookup step. Creates the transaction, awards/redeems coins, and
-    sends the customer a WhatsApp/SMS summary.
+    sends the customer an SMS summary.
     """
     import logging
     from app.services.transactions import create_transaction

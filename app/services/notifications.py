@@ -14,27 +14,8 @@ def _twilio_client():
 
 
 async def send_otp(mobile: str, otp: str) -> None:
-    """Send OTP via WhatsApp (preferred) with SMS fallback."""
-    message = messages.otp_message(otp)
-
-    if settings.TWILIO_WHATSAPP_FROM:
-        try:
-            await _send_whatsapp(mobile, message)
-            return
-        except Exception as e:
-            logger.warning("WhatsApp OTP failed for %s, falling back to SMS: %s", mobile, e)
-
-    await _send_sms(mobile, message)
-
-
-async def _send_whatsapp(mobile: str, message: str) -> None:
-    client = _twilio_client()
-    client.messages.create(
-        body=message,
-        from_=settings.TWILIO_WHATSAPP_FROM,
-        to=f"whatsapp:{mobile}",
-    )
-    logger.info("WhatsApp sent to %s", mobile)
+    """Send OTP via SMS."""
+    await _send_sms(mobile, messages.otp_message(otp))
 
 
 async def _send_sms(mobile: str, message: str) -> None:
@@ -48,23 +29,10 @@ async def _send_sms(mobile: str, message: str) -> None:
 
 
 async def send_expiry_reminder(mobile: str, coins: int, expiry_date: str) -> None:
-    message = messages.expiry_reminder(coins, expiry_date)
-    if settings.TWILIO_WHATSAPP_FROM:
-        try:
-            await _send_whatsapp(mobile, message)
-            return
-        except Exception as e:
-            logger.warning("WhatsApp expiry reminder failed for %s: %s", mobile, e)
-    await _send_sms(mobile, message)
+    await _send_sms(mobile, messages.expiry_reminder(coins, expiry_date))
 
 
 async def send_campaign_message(mobile: str, title: str, message_body: str) -> None:
-    if settings.TWILIO_WHATSAPP_FROM:
-        try:
-            await _send_whatsapp(mobile, message_body)
-            return
-        except Exception as e:
-            logger.warning("WhatsApp campaign message failed for %s: %s", mobile, e)
     await _send_sms(mobile, message_body)
 
 
@@ -90,13 +58,6 @@ async def send_transaction_notification(
         coins_redeemed_value=coins_redeemed_value,
         balance=balance,
     )
-
-    if settings.TWILIO_WHATSAPP_FROM:
-        try:
-            await _send_whatsapp(mobile, message)
-            return
-        except Exception as e:
-            logger.warning("WhatsApp txn notification failed for %s: %s", mobile, e)
     await _send_sms(mobile, message)
 
 
@@ -129,7 +90,6 @@ async def dispatch_expiry_notification(user_id: str) -> None:
             return
 
         expiry_str = row["earliest"].strftime("%d %b %Y")
-        channel = "whatsapp" if settings.TWILIO_WHATSAPP_FROM else "sms"
 
         try:
             await send_expiry_reminder(user["mobile_number"], int(row["total"]), expiry_str)
@@ -143,7 +103,7 @@ async def dispatch_expiry_notification(user_id: str) -> None:
         await conn.execute(
             """INSERT INTO notification_logs
                    (id, user_id, channel, type, status, error_detail, sent_at, created_at)
-               VALUES ($1,$2,$3,'coins_expiry',$4,$5,$6,$7)""",
-            new_uuid(), user_id, channel, log_status, log_error,
+               VALUES ($1,$2,'sms','coins_expiry',$3,$4,$5,$6)""",
+            new_uuid(), user_id, log_status, log_error,
             now if log_status == "sent" else None, now,
         )
