@@ -7,7 +7,7 @@ FastAPI loyalty & rewards platform for a retail shop.
 - **Database**: PostgreSQL + SQLAlchemy 2.0 async + Alembic migrations
 - **Cache**: Redis (OTP storage, JWT refresh blacklist)
 - **Scheduler**: APScheduler (in-process, replaces Celery — no separate worker)
-- **Notifications**: Twilio SMS
+- **Notifications**: Expo push (primary for logged-in users) → Twilio SMS fallback
 - **Config**: pydantic-settings, single `.env` file
 
 ## Project structure

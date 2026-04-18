@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS users (
     name         VARCHAR(100),
     role         VARCHAR(10) NOT NULL DEFAULT 'user',
     is_active    BOOLEAN NOT NULL DEFAULT true,
+    push_token   VARCHAR(255),
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

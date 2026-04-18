@@ -196,3 +196,52 @@ async def test_update_profile_name(client, redis):
 async def test_balance_endpoint_requires_auth(client):
     response = await client.get("/api/v1/users/me/coins/balance")
     assert response.status_code == 401
+
+
+# ── Push token registration ───────────────────────────────────────────────────
+
+async def test_register_push_token_saves_to_db(client, conn, redis):
+    mobile = "+919800000030"
+    headers = await login(client, redis, mobile)
+    token = "ExponentPushToken[abc123xyz]"
+
+    resp = await client.post(
+        "/api/v1/users/me/push-token",
+        json={"push_token": token},
+        headers=headers,
+    )
+    assert resp.status_code == 204
+
+    row = await conn.fetchrow(
+        "SELECT push_token FROM users WHERE mobile_number = $1", mobile
+    )
+    assert row["push_token"] == token
+
+
+async def test_register_push_token_overwrites_existing(client, conn, redis):
+    mobile = "+919800000031"
+    headers = await login(client, redis, mobile)
+
+    await client.post(
+        "/api/v1/users/me/push-token",
+        json={"push_token": "ExponentPushToken[old]"},
+        headers=headers,
+    )
+    await client.post(
+        "/api/v1/users/me/push-token",
+        json={"push_token": "ExponentPushToken[new]"},
+        headers=headers,
+    )
+
+    row = await conn.fetchrow(
+        "SELECT push_token FROM users WHERE mobile_number = $1", mobile
+    )
+    assert row["push_token"] == "ExponentPushToken[new]"
+
+
+async def test_register_push_token_requires_auth(client):
+    resp = await client.post(
+        "/api/v1/users/me/push-token",
+        json={"push_token": "ExponentPushToken[abc]"},
+    )
+    assert resp.status_code == 401

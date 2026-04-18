@@ -365,7 +365,7 @@ async def admin_checkout(
         )
 
     user = await conn.fetchrow(
-        "SELECT id, mobile_number, name FROM users WHERE mobile_number = $1",
+        "SELECT id, mobile_number, name, push_token FROM users WHERE mobile_number = $1",
         body.mobile_number,
     )
     if not user:
@@ -389,6 +389,7 @@ async def admin_checkout(
             coins_redeemed=txn["coins_redeemed"],
             coins_redeemed_value=txn["coins_redeemed_value"],
             balance=txn["coins_balance_after"],
+            push_token=user["push_token"],
         )
         notification_sent = True
     except Exception as e:
