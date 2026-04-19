@@ -43,8 +43,31 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
           SECRET_KEY: test-secret-key
 
+  prod-install-smoke:
+    # Mirrors the Railway build: installs runtime deps only, then imports
+    # app.main. Catches packages that are imported under app/ but were
+    # mistakenly placed in [dependency-groups].dev (would pass tests, crash
+    # in prod). See "Dependency classification" in CLAUDE.md.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install runtime deps only (no dev group)
+        run: pip install uv && uv sync --frozen --no-dev
+
+      - name: Import app.main with runtime deps only
+        run: uv run --no-dev python -c "import app.main"
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/test_db
+          REDIS_URL: redis://localhost:6379/0
+          SECRET_KEY: test-secret-key
+
   deploy:
-    needs: test
+    needs: [test, prod-install-smoke]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:
