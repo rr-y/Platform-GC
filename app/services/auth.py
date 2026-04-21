@@ -19,8 +19,21 @@ REFRESH_KEY = "refresh:{}"
 
 # ── OTP ───────────────────────────────────────────────────────────────────────
 
+def _is_review_account(mobile: str) -> bool:
+    """True when the caller is the configured Play Store / App Store reviewer."""
+    return bool(
+        settings.TEST_MOBILE_NUMBER
+        and settings.TEST_OTP
+        and mobile == settings.TEST_MOBILE_NUMBER
+    )
+
+
 async def request_otp(mobile: str, redis: Redis) -> None:
     """Generate OTP, enforce rate limit, store in Redis, send via Twilio."""
+    if _is_review_account(mobile):
+        logger.info("OTP request for review account %s bypassed", mobile)
+        return
+
     count_key = OTP_REQ_COUNT_KEY.format(mobile)
     count = await redis.get(count_key)
     if count and int(count) >= settings.OTP_MAX_REQUESTS:
@@ -43,6 +56,9 @@ async def request_otp(mobile: str, redis: Redis) -> None:
 
 
 async def verify_otp(mobile: str, otp: str, redis: Redis) -> bool:
+    if _is_review_account(mobile):
+        return hmac.compare_digest(settings.TEST_OTP, otp)
+
     stored = await redis.get(OTP_KEY.format(mobile))
     if not stored:
         return False
