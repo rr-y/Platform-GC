@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     OTP_MAX_REQUESTS: int = 3
     OTP_RATE_WINDOW_SECONDS: int = 600
 
+    # Play Store / App Store review credentials. Both must be set to activate;
+    # empty = disabled. The mobile value must be in E.164 form (e.g. +919999999999).
+    TEST_MOBILE_NUMBER: str = ""
+    TEST_OTP: str = ""
+
     # Coins
     COINS_EARN_RATE: float = 5.0            # coins per ₹100 spent
     COIN_RUPEE_VALUE: float = 0.10          # 1 coin = ₹0.10
