@@ -114,6 +114,38 @@ CREATE TABLE IF NOT EXISTS campaign_user_eligibility (
     UNIQUE (campaign_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_campaign_user_elig ON campaign_user_eligibility(user_id, campaign_id);
+
+CREATE TABLE IF NOT EXISTS print_jobs (
+    id               VARCHAR(36) PRIMARY KEY,
+    user_id          VARCHAR(36) NOT NULL REFERENCES users(id),
+    file_name        VARCHAR(255) NOT NULL,
+    mime_type        VARCHAR(50) NOT NULL,
+    file_size        INTEGER NOT NULL,
+    storage_path     TEXT,
+    page_count       INTEGER NOT NULL,
+    selected_pages   JSONB,
+    color_mode       VARCHAR(10),
+    copies           INTEGER,
+    subtotal         NUMERIC(12,2),
+    coins_to_redeem  INTEGER NOT NULL DEFAULT 0,
+    coin_value       NUMERIC(12,2) NOT NULL DEFAULT 0,
+    final_amount     NUMERIC(12,2),
+    pickup_otp       CHAR(4),
+    status           VARCHAR(20) NOT NULL DEFAULT 'draft',
+    retry_count      INTEGER NOT NULL DEFAULT 0,
+    transaction_id   VARCHAR(36) REFERENCES transactions(id),
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    queued_at        TIMESTAMPTZ,
+    claimed_at       TIMESTAMPTZ,
+    printed_at       TIMESTAMPTZ,
+    collected_at     TIMESTAMPTZ,
+    cancelled_at     TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_print_user_status ON print_jobs(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_print_queued ON print_jobs(status, queued_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_print_active_pickup_otp
+    ON print_jobs (pickup_otp)
+    WHERE status IN ('queued','printing','printed');
 """
 
 
@@ -136,7 +168,7 @@ async def test_pool():
     async with pool.acquire() as conn:
         await conn.execute(
             """DROP TABLE IF EXISTS
-               notification_logs, coupon_redemptions, transactions,
+               print_jobs, notification_logs, coupon_redemptions, transactions,
                coins_ledger, campaign_user_eligibility, coupons, campaigns, users CASCADE"""
         )
         await conn.execute(_SCHEMA_SQL)

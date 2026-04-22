@@ -6,6 +6,7 @@ services:
     env_file: .env
     volumes:
       - ./app:/app/app   # hot reload in dev
+      - ./data:/data     # print-store uploads (mirrors the Railway Volume in prod)
     depends_on:
       db:
         condition: service_healthy

@@ -46,6 +46,16 @@ class Settings(BaseSettings):
     TWILIO_AUTH_TOKEN: str = ""
     TWILIO_FROM_NUMBER: str = ""
 
+    # Print Store
+    PRINT_PRICE_BW_PER_PAGE: float = 2.0
+    PRINT_PRICE_COLOR_PER_PAGE: float = 10.0
+    PRINT_MAX_FILE_SIZE_MB: int = 25
+    PRINT_STORAGE_DIR: str = "/data/prints"
+    PRINT_DRAFT_TTL_HOURS: int = 1
+    PRINT_UNCOLLECTED_RETENTION_DAYS: int = 30
+    # Blank disables the Raspberry Pi device endpoints entirely.
+    DEVICE_API_KEY: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property

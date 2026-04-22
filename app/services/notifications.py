@@ -61,6 +61,17 @@ async def send_campaign_message(mobile: str, title: str, message_body: str) -> N
     await _send_sms(mobile, message_body)
 
 
+async def send_print_ready(
+    mobile: str,
+    name: str | None,
+    pickup_otp: str,
+    final_amount: float,
+    push_token: str | None = None,
+) -> str:
+    body = messages.print_ready_message(name, pickup_otp, final_amount)
+    return await _send_push_or_sms(push_token, mobile, "Print Ready for Pickup", body)
+
+
 async def send_transaction_notification(
     mobile: str,
     name: str | None,

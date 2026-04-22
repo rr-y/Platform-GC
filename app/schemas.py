@@ -349,3 +349,102 @@ class AdminInviteOut(BaseModel):
     message: str
     mobile_number: str
     expires_in_seconds: int
+
+
+# ── Print Store ───────────────────────────────────────────────────────────────
+
+class PrintUploadOut(BaseModel):
+    upload_id: str
+    file_name: str
+    mime_type: str
+    page_count: int
+    file_size: int
+
+
+class PrintJobEstimateIn(BaseModel):
+    page_count: int
+    selected_pages: list[int]
+    color_mode: str  # 'bw' | 'color'
+    copies: int
+    coins_to_redeem: int = 0
+
+
+class PrintJobCreate(BaseModel):
+    upload_id: str
+    selected_pages: list[int]
+    color_mode: str  # 'bw' | 'color'
+    copies: int
+    coins_to_redeem: int = 0
+
+
+class PrintPriceBreakdown(BaseModel):
+    pages_to_print: int
+    copies: int
+    color_mode: str
+    rate_per_page: float
+    subtotal: float
+    coins_to_redeem: int
+    coin_value: float
+    final_amount: float
+
+
+class PrintJobOut(BaseModel):
+    id: str
+    file_name: str
+    mime_type: str
+    page_count: int
+    selected_pages: list[int] | None
+    color_mode: str | None
+    copies: int | None
+    subtotal: float | None
+    coins_to_redeem: int
+    coin_value: float
+    final_amount: float | None
+    pickup_otp: str | None
+    status: str
+    created_at: str
+    queued_at: str | None
+    printed_at: str | None
+    collected_at: str | None
+
+
+class PrintJobSubmitOut(BaseModel):
+    job: PrintJobOut
+    breakdown: PrintPriceBreakdown
+
+
+class DeviceJobOut(BaseModel):
+    job_id: str
+    file_name: str
+    mime_type: str
+    selected_pages: list[int]
+    color_mode: str
+    copies: int
+    file_url: str
+
+
+class DeviceJobsOut(BaseModel):
+    jobs: list[DeviceJobOut]
+
+
+class AdminPrintLookupIn(BaseModel):
+    pickup_otp: str
+
+
+class AdminPrintLookupOut(BaseModel):
+    job_id: str
+    user_id: str
+    name: str | None
+    mobile_number: str
+    file_name: str
+    status: str
+    breakdown: PrintPriceBreakdown
+
+
+class AdminPrintCollectOut(BaseModel):
+    job_id: str
+    transaction_id: str
+    final_amount: float
+    coins_redeemed: int
+    coins_earned: int
+    coins_balance_after: int

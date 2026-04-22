@@ -13,11 +13,15 @@ from app.schemas import (
     AdminCustomerLookupOut,
     AdminInviteIn,
     AdminInviteOut,
+    AdminPrintCollectOut,
+    AdminPrintLookupIn,
+    AdminPrintLookupOut,
     CampaignIn,
     CampaignOut,
     CampaignUserEligibilityIn,
     CoinAdjustIn,
     CouponAddIn,
+    PrintPriceBreakdown,
     UserAdminOut,
 )
 from app.services.coins import award_coins, get_balance
@@ -396,6 +400,98 @@ async def admin_checkout(
         logger.warning("Transaction notification failed for %s: %s", user["mobile_number"], e)
 
     return AdminCheckoutOut(**txn, notification_sent=notification_sent)
+
+
+# ── Print Store pickup ────────────────────────────────────────────────────────
+
+@router.post("/print/lookup", response_model=AdminPrintLookupOut)
+async def admin_print_lookup(
+    body: AdminPrintLookupIn,
+    _: dict = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+):
+    """Look up a print job by the customer's 4-digit pickup OTP."""
+    from app.services import print as print_service
+
+    job = await print_service.lookup_by_otp(body.pickup_otp, conn)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pickup OTP not found")
+    return AdminPrintLookupOut(
+        job_id=job["job_id"],
+        user_id=job["user_id"],
+        name=job["name"],
+        mobile_number=job["mobile_number"],
+        file_name=job["file_name"],
+        status=job["status"],
+        breakdown=PrintPriceBreakdown(
+            pages_to_print=len(job["selected_pages"] or []),
+            copies=job["copies"],
+            color_mode=job["color_mode"],
+            rate_per_page=_rate_for(job["color_mode"]),
+            subtotal=job["subtotal"],
+            coins_to_redeem=job["coins_to_redeem"],
+            coin_value=job["coin_value"],
+            final_amount=job["final_amount"],
+        ),
+    )
+
+
+@router.post(
+    "/print/jobs/{job_id}/collect",
+    response_model=AdminPrintCollectOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def admin_print_collect(
+    job_id: str,
+    _: dict = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+):
+    """Record cash payment for a printed job, create a transaction, mark collected."""
+    from app.services import print as print_service
+    from app.services.coins import InsufficientCoinsError
+    from app.services.transactions import create_transaction
+
+    row = await conn.fetchrow(
+        """SELECT id, user_id, status, subtotal, coins_to_redeem
+           FROM print_jobs WHERE id = $1""",
+        job_id,
+    )
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    if row["status"] != "printed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Job is in status '{row['status']}', cannot collect",
+        )
+
+    try:
+        txn = await create_transaction(
+            user_id=row["user_id"],
+            amount=float(row["subtotal"]),
+            conn=conn,
+            coins_to_redeem=row["coins_to_redeem"],
+        )
+    except InsufficientCoinsError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    await print_service.mark_collected(job_id, txn["transaction_id"], conn)
+    return AdminPrintCollectOut(
+        job_id=job_id,
+        transaction_id=txn["transaction_id"],
+        final_amount=txn["final_amount"],
+        coins_redeemed=txn["coins_redeemed"],
+        coins_earned=txn["coins_earned"],
+        coins_balance_after=txn["coins_balance_after"],
+    )
+
+
+def _rate_for(color_mode: str) -> float:
+    from app.config import settings
+    return float(
+        settings.PRINT_PRICE_COLOR_PER_PAGE
+        if color_mode == "color"
+        else settings.PRINT_PRICE_BW_PER_PAGE
+    )
 
 
 # ── Campaign User Eligibility ─────────────────────────────────────────────────
