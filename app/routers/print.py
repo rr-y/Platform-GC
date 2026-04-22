@@ -187,6 +187,7 @@ async def device_printed(
             name=result["name"],
             pickup_otp=result["pickup_otp"],
             final_amount=result["final_amount"],
+            job_id=job_id,
             push_token=result["push_token"],
         )
     except Exception:
