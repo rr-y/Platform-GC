@@ -34,13 +34,17 @@ async def _send_push_or_sms(
     mobile: str,
     title: str,
     body: str,
+    data: dict | None = None,
 ) -> str:
     """
     Try push first when a token exists; fall back to SMS on any failure or
     when there is no token. Returns the channel actually used ("push" or "sms").
+
+    `data` is the Expo push `data` payload — used by the mobile app to
+    deep-link the notification tap to the right screen.
     """
     if push_token:
-        if await send_push(push_token, title, body):
+        if await send_push(push_token, title, body, data=data):
             return "push"
         logger.info("Push failed for %s, falling back to SMS", mobile)
     await _send_sms(mobile, body)
@@ -59,6 +63,19 @@ async def send_expiry_reminder(
 
 async def send_campaign_message(mobile: str, title: str, message_body: str) -> None:
     await _send_sms(mobile, message_body)
+
+
+async def send_print_ready(
+    mobile: str,
+    name: str | None,
+    pickup_otp: str,
+    final_amount: float,
+    job_id: str | None = None,
+    push_token: str | None = None,
+) -> str:
+    body = messages.print_ready_message(name, pickup_otp, final_amount)
+    data = {"type": "print_ready", "job_id": job_id} if job_id else {"type": "print_ready"}
+    return await _send_push_or_sms(push_token, mobile, "Print Ready for Pickup", body, data=data)
 
 
 async def send_transaction_notification(

@@ -1,7 +1,10 @@
+import hmac
+
 import asyncpg
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from app.config import settings
 from app.database import get_conn
 from app.utils.security import decode_token
 
@@ -29,3 +32,12 @@ async def require_admin(user: dict = Depends(get_current_user)) -> dict:
     if user["role"] != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return user
+
+
+async def require_device(x_device_key: str | None = Header(default=None)) -> None:
+    # Blank DEVICE_API_KEY disables the endpoint entirely so an unconfigured
+    # prod can't be polled.
+    if not settings.DEVICE_API_KEY:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Device endpoints disabled")
+    if not x_device_key or not hmac.compare_digest(x_device_key, settings.DEVICE_API_KEY):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid device key")

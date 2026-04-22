@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -8,8 +9,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import close_pool, init_pool
-from app.jobs import expire_coins, send_expiry_notifications
+from app.jobs import (
+    expire_coins,
+    purge_abandoned_print_drafts,
+    purge_old_printed_metadata,
+    send_expiry_notifications,
+)
 from app.routers import admin, auth, coins, coupons, offers, transactions
+from app.routers import print as print_router
 
 logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO))
 logger = logging.getLogger(__name__)
@@ -20,8 +27,11 @@ scheduler = AsyncIOScheduler(timezone="Asia/Kolkata")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_pool()
+    os.makedirs(settings.PRINT_STORAGE_DIR, exist_ok=True)
     scheduler.add_job(expire_coins, CronTrigger(hour=2, minute=0), id="expire_coins")
     scheduler.add_job(send_expiry_notifications, CronTrigger(hour=9, minute=0), id="expiry_notifs")
+    scheduler.add_job(purge_abandoned_print_drafts, CronTrigger(minute=30), id="purge_print_drafts")
+    scheduler.add_job(purge_old_printed_metadata, CronTrigger(hour=3, minute=0), id="purge_printed_meta")
     scheduler.start()
     logger.info("Scheduler started")
     yield
@@ -49,6 +59,7 @@ app.include_router(coins.router, prefix="/api/v1")
 app.include_router(transactions.router, prefix="/api/v1")
 app.include_router(coupons.router, prefix="/api/v1")
 app.include_router(offers.router, prefix="/api/v1")
+app.include_router(print_router.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 
 

@@ -46,3 +46,7 @@ dist/
 htmlcov/
 .coverage
 test.db
+
+# Print Store local uploads — keep the directory, drop its contents.
+data/*
+!data/.gitkeep

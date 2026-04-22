@@ -46,3 +46,23 @@ async def send_expiry_notifications() -> None:
             logger.error("Failed to send expiry notification to %s: %s", user_id, e)
 
     logger.info("send_expiry_notifications: notified %d users", len(user_ids))
+
+
+async def purge_abandoned_print_drafts() -> None:
+    """Delete draft print_jobs older than PRINT_DRAFT_TTL_HOURS along with their files."""
+    from app.database import get_pool
+    from app.services.print import purge_abandoned_drafts
+
+    async with get_pool().acquire() as conn:
+        removed = await purge_abandoned_drafts(conn)
+    logger.info("purge_abandoned_print_drafts: removed %d drafts", removed)
+
+
+async def purge_old_printed_metadata() -> None:
+    """Delete metadata for printed-but-uncollected jobs older than the retention cutoff."""
+    from app.database import get_pool
+    from app.services.print import purge_old_printed_metadata as _purge
+
+    async with get_pool().acquire() as conn:
+        removed = await _purge(conn)
+    logger.info("purge_old_printed_metadata: removed %d rows", removed)

@@ -59,6 +59,14 @@ def transaction_summary(
     return " ".join(parts)
 
 
+def print_ready_message(name: str | None, pickup_otp: str, final_amount: float) -> str:
+    greeting = f"Hi {name}!" if name else "Hi!"
+    return (
+        f"{greeting} Your print is ready for pickup. Show OTP {pickup_otp} at the counter "
+        f"and pay \u20b9{final_amount:.2f} in cash."
+    )
+
+
 def coins_expiry_warning(name: str | None, coins: int, expiry_date: str) -> str:
     """
     Appended to the transaction summary when coins are expiring soon

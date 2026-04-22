@@ -5,6 +5,7 @@
 dev:
 	@echo "Stopping any running containers..."
 	@docker-compose down --remove-orphans 2>/dev/null || true
+	@mkdir -p data
 	@echo "Starting backend (api + postgres + redis)..."
 	docker-compose up --build
 
