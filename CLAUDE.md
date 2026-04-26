@@ -84,6 +84,17 @@ git push -u origin fix/bug-description
 - Tests use SQLite (aiosqlite) + fakeredis — no real infrastructure needed
 - Pre-push hook runs all 52 tests before every `git push`
 
+## Dependency classification (non-negotiable)
+Prod is deployed with dev groups excluded. A package imported under `app/` but listed only in the dev group will pass tests locally and in CI, then crash at runtime on Railway. This has already caused one production incident (httpx).
+
+- **Any package imported anywhere under `app/` must live in `[project].dependencies` in `pyproject.toml`.** Not `[dependency-groups].dev`. No exceptions.
+- **`[dependency-groups].dev` is strictly for test-only tooling** — `pytest`, `pytest-asyncio`, `pytest-cov`, `fakeredis`, etc. If `app/*` imports it, it is not dev.
+- **Always add deps via `uv add`, never hand-edit `pyproject.toml`:**
+  - Runtime: `uv add <pkg>`
+  - Test-only: `uv add --group dev <pkg>`
+  Hand-editing under the wrong table is the exact mistake that broke prod.
+- **Before opening a PR that adds a new `import`**, confirm the package is in `[project].dependencies` and that `uv sync --frozen --no-dev && uv run python -c "import app.main"` succeeds. CI enforces this, but catch it locally first.
+
 ## Coin ledger design
 - Signed ledger: earned = +N, redeemed = -N
 - Balance = `SUM(coins) WHERE status='active' AND expiry_at > now()`
